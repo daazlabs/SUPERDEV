@@ -923,3 +923,61 @@ de mais de 5 voltas de ferramentas (não um ciclo preso, uma tarefa real
 maior), `MAX_VOLTAS_FERRAMENTAS=5` corta-o na mesma — não distinguido
 dos dois casos. Fica para quando houver um caso real desse tipo, não
 antes.
+
+## `ler_varios_ficheiros`: o caso real previsto acima aconteceu (9 Ago 2026)
+
+Consequência directa da secção anterior — utilizador pediu ao
+SUPERDEV, pelo Open WebUI, para se auto-analisar lendo o
+`HISTORICO.md` + todo o código (`agent.py`, `config.py`, `memory.py`,
+`pgmemory.py`, `server.py`, `tools.py`, `ver_conversa.py`,
+`ver_logs.py`) — 9 ficheiros. Excedeu `MAX_VOLTAS_FERRAMENTAS` a meio
+(leu 7 de 9), mesmo já com a correcção do caminho do dia (achou o
+projecto certo à primeira, só tropeçou na maiúscula
+`historico.md`/`HISTORICO.md`, e corrigiu-se sozinho).
+
+**Achado à parte, importante**: a 1ª ideia (subir
+`MAX_VOLTAS_FERRAMENTAS` de 5 para 12+) foi **rejeitada pelo
+utilizador, com razão** — subir o limite não reduz tokens nenhuns, só
+adia a falha: cada volta reenvia a conversa TODA até ali (Ollama não
+tem memória entre chamadas), por isso os tokens de entrada cresciam a
+cada ficheiro (950 → 1158 → 3109 → 3233 → 3387 → 5738 → 14125,
+confirmado no log). Subir o número só deixaria a mesma escalada
+continuar mais tempo, não a cortaria.
+
+**Descoberta lateral, no mesmo incidente**: o Open WebUI, por
+omissão, chama o modelo configurado (`superdev`) 3 vezes extra a
+seguir a cada resposta — para gerar título da conversa, sugestões de
+seguimento, e tags — cada uma dessas chamadas passa pelo agente
+completo (RAG + identidade + ferramentas), gastando ~13 mil tokens
+"escondidos" só em tarefas de interface, sem valor para o utilizador.
+**Corrigido, mas fora deste repositório** — são definições do próprio
+Open WebUI (Admin Panel → Settings → Interface → Tasks): "Title
+Generation", "Follow Up Generation" e "Tags Generation" desligados.
+Nada a mudar no SUPERDEV para isto.
+
+**A correcção real (que reduz tokens, não só adia a falha):** nova
+ferramenta `ler_varios_ficheiros(caminhos: list)` — lê vários
+ficheiros numa só volta, reaproveitando `ler_ficheiro` por dentro
+(mesmas mensagens de erro, mesmo corte por ficheiro), com dois tectos
+próprios (`LIMITE_FICHEIROS_LOTE=15`, `LIMITE_CARACTERES_LOTE=30000`)
+para nunca rebentar sozinha com o lote todo. Descrição do
+`ler_ficheiro` em `TOOL_DEFS` ganhou uma frase a apontar para a nova
+ferramenta quando for preciso mais que 1 ficheiro — é o que fez o
+modelo preferi-la sem precisar de mais nada.
+
+De caminho, aproveitado para corrigir 2 avisos do `ruff` no
+`correr_ruff` (código de hoje, nunca tinha corrido `ruff check
+tools.py` depois de o escrever): `tempfile.NamedTemporaryFile` passou
+a usar `with` em vez de abrir/fechar à mão, e `subprocess.run` ganhou
+`check=False` explícito. Os avisos pré-existentes de 8 Ago
+(`fnmatch` por usar, `except Exception` genérico em 3 sítios) ficaram
+por resolver, fora do âmbito de hoje.
+
+**Testado ao vivo, ponta-a-ponta, com o pedido exacto que tinha
+falhado antes:** reiniciado o `server.py` (código só carrega uma vez
+no arranque), repetido o pedido pelo `curl` (simula o Open WebUI).
+Resultado: **3 voltas em vez de 7**, o modelo usou
+`ler_varios_ficheiros` sozinho com os 8 ficheiros de código numa só
+chamada (confirmado no log, nome+argumentos completos), respondeu com
+sucesso — e a resposta já listava primeiro o que estava implementado
+antes de sugerir melhorias (o que faltava na tentativa anterior).

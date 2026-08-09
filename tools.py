@@ -33,6 +33,18 @@ ao modelo — ao contrário de auto-crítica, que dobra sempre o custo. O
 código recebido nunca toca em ficheiros reais do projecto: é escrito
 num ficheiro temporário descartável só para a duração da verificação,
 apagado logo a seguir, mesmo em caso de erro/timeout.
+
+Ferramenta 5, ler_varios_ficheiros (9 Ago 2026) — motivada por um caso
+real: um pedido para analisar 9 ficheiros do próprio projecto excedeu
+MAX_VOLTAS_FERRAMENTAS (5) a meio, porque ler_ficheiro só lê 1 de cada
+vez, e CADA volta reenvia a conversa TODA até ali (a Ollama não tem
+memória entre chamadas) — o custo crescia a cada ficheiro, não só o
+número de voltas. A correcção óbvia (subir o limite) foi rejeitada de
+propósito: só adiava o problema, não o resolvia — continuava a pagar
+o "reenviar tudo" N vezes, só que N maior. Ler vários ficheiros numa
+só volta corta as voltas necessárias de ~N para ~1-2, sem tocar no
+limite. Mesmo espírito só-leitura das outras: falha de forma clara por
+ficheiro (reaproveita ler_ficheiro), nunca inventa.
 """
 import fnmatch
 import os
@@ -54,6 +66,14 @@ LIMITE_FICHEIROS_PROCURADOS = 500
 # demorar mais que isto num ficheiro só; se demorar, é sinal de que
 # algo está mal, não vale a pena esperar mais.
 RUFF_TIMEOUT_S = 5
+
+# Limites do ler_varios_ficheiros — dois tectos independentes: nº de
+# ficheiros pedidos de uma vez (não vale a pena pedir 200) e caracteres
+# somados de todos juntos (não vale a pena um só lote rebentar sozinho
+# com a janela de contexto). Mesma filosofia dos outros limites deste
+# ficheiro: cortar de forma clara, nunca correr sem tecto.
+LIMITE_FICHEIROS_LOTE = 15
+LIMITE_CARACTERES_LOTE = 30000
 
 
 def ler_ficheiro(caminho: str) -> str:
@@ -163,18 +183,18 @@ def correr_ruff(codigo: str) -> str:
     limpo. O código é escrito num ficheiro temporário só para a
     verificação e apagado logo a seguir — nunca fica no disco, nunca
     toca em ficheiros reais do projecto."""
-    tmp = tempfile.NamedTemporaryFile(
+    with tempfile.NamedTemporaryFile(
         mode="w", suffix=".py", delete=False, encoding="utf-8"
-    )
-    try:
+    ) as tmp:
         tmp.write(codigo)
-        tmp.close()
+    try:
         try:
             resultado = subprocess.run(
                 ["ruff", "check", "--output-format=concise", tmp.name],
                 capture_output=True,
                 text=True,
                 timeout=RUFF_TIMEOUT_S,
+                check=False,
             )
         except FileNotFoundError:
             return "[ERRO] ruff não está instalado neste sistema."
@@ -200,6 +220,47 @@ def correr_ruff(codigo: str) -> str:
     return saida
 
 
+def ler_varios_ficheiros(caminhos: list) -> str:
+    """Lê vários ficheiros de texto numa só chamada — cada ficheiro
+    passa pelo mesmo ler_ficheiro (mesmas mensagens de erro, mesmo
+    corte por ficheiro), mas tudo junto numa só volta em vez de uma
+    volta por ficheiro. Pára de ler mais ficheiros se o total somado
+    ultrapassar LIMITE_CARACTERES_LOTE, avisando de forma clara
+    quantos ficaram por ler — nunca corta um ficheiro a meio sem
+    dizer."""
+    aviso_demasiados = None
+    if len(caminhos) > LIMITE_FICHEIROS_LOTE:
+        aviso_demasiados = (
+            f"[AVISO] Pediste {len(caminhos)} ficheiros, só os "
+            f"primeiros {LIMITE_FICHEIROS_LOTE} foram lidos."
+        )
+        caminhos = caminhos[:LIMITE_FICHEIROS_LOTE]
+
+    partes = []
+    total = 0
+    ficheiros_por_ler = 0
+    for i, caminho in enumerate(caminhos):
+        if total >= LIMITE_CARACTERES_LOTE:
+            ficheiros_por_ler = len(caminhos) - i
+            break
+        conteudo = ler_ficheiro(caminho)
+        restante = LIMITE_CARACTERES_LOTE - total
+        if len(conteudo) > restante:
+            conteudo = conteudo[:restante] + "\n...[cortado — limite total do lote atingido]"
+        partes.append(f"=== {caminho} ===\n{conteudo}")
+        total += len(conteudo)
+
+    resultado = "\n\n".join(partes)
+    if ficheiros_por_ler:
+        resultado += (
+            f"\n\n[AVISO] {ficheiros_por_ler} ficheiro(s) não lidos — "
+            "limite total do lote atingido."
+        )
+    if aviso_demasiados:
+        resultado += f"\n\n{aviso_demasiados}"
+    return resultado
+
+
 # Definições no formato nativo da Ollama (compatível com a convenção
 # OpenAI de function-calling) — é isto que vai no campo "tools" do
 # pedido à API.
@@ -218,7 +279,12 @@ TOOL_DEFS = [
         "type": "function",
         "function": {
             "name": "ler_ficheiro",
-            "description": "Reads the content of a text file from disk.",
+            "description": (
+                "Reads the content of a text file from disk. If you need "
+                "more than one file, use ler_varios_ficheiros instead — "
+                "one round-trip for all of them is much cheaper than one "
+                "round-trip per file."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -296,6 +362,30 @@ TOOL_DEFS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "ler_varios_ficheiros",
+            "description": (
+                "Reads multiple text files in a single call. Prefer this "
+                "over calling ler_ficheiro repeatedly whenever you need "
+                "more than one file — each tool round-trip resends the "
+                "whole conversation so far, so one call for N files is "
+                "much cheaper than N separate calls."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "caminhos": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Absolute paths of the files to read",
+                    },
+                },
+                "required": ["caminhos"],
+            },
+        },
+    },
 ]
 
 # Mapa nome -> função real, para executar o que o modelo pedir.
@@ -304,4 +394,5 @@ FUNCOES = {
     "listar_ficheiros": listar_ficheiros,
     "procurar_texto": procurar_texto,
     "correr_ruff": correr_ruff,
+    "ler_varios_ficheiros": ler_varios_ficheiros,
 }

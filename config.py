@@ -127,8 +127,17 @@ OPTIONS = {
 THINK = False
 
 # Ficheiro de registo de cada pedido (o "espião") — para deixarmos de
-# adivinhar e passarmos a medir sempre.
+# adivinhar e passarmos a medir sempre. Só métricas, nunca o texto real
+# (decisão deliberada, ver HISTORICO.md — susto de segurança 9 Ago).
 LOG_FILE = os.path.join(BASE_DIR, "logs", "chamadas.jsonl")
+
+# Ficheiro à parte, SÓ para a fase de testes (9 Ago 2026) — pergunta e
+# resposta reais, para o utilizador (e o Claude, a pedido dele) poderem
+# reler a conversa toda depois, não só métricas. Separado de LOG_FILE
+# de propósito: mais sensível (tem texto real), fácil de apagar sozinho
+# no fim da fase de testes sem tocar no registo de métricas. Também em
+# .gitignore (logs/*.jsonl já cobre qualquer ficheiro novo aqui).
+CONVERSATION_LOG_FILE = os.path.join(BASE_DIR, "logs", "conversas.jsonl")
 
 # --- Núcleo mínimo (Grupo A — sempre presente em todos os pedidos) ------
 # Curto de propósito. Tudo o resto (memória, skills, conhecimento) é

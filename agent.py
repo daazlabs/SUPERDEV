@@ -29,14 +29,18 @@ import pgmemory
 import tools
 
 
-def _log(registo: dict) -> None:
-    """O 'espião' — uma linha JSON por pedido, nada é descartado."""
-    os.makedirs(os.path.dirname(config.LOG_FILE), exist_ok=True)
-    with open(config.LOG_FILE, "a") as f:
+def _log(registo: dict, caminho: str | None = None) -> None:
+    """O 'espião' — uma linha JSON por pedido, nada é descartado. Por
+    omissão escreve em config.LOG_FILE (métricas); caminho é
+    parametrizável para também servir config.CONVERSATION_LOG_FILE
+    (pergunta/resposta reais, só na fase de testes — ver comentário lá)."""
+    caminho = caminho or config.LOG_FILE
+    os.makedirs(os.path.dirname(caminho), exist_ok=True)
+    with open(caminho, "a") as f:
         f.write(json.dumps(registo, ensure_ascii=False) + "\n")
 
 
-def ollama_chat(messages: list, ferramentas: list = None, memorias_usadas: list = None) -> dict:
+def ollama_chat(messages: list, ferramentas: list | None = None, memorias_usadas: list | None = None) -> dict:
     """Chama a Ollama e devolve a mensagem completa (não só o texto) —
     pode vir com 'content' (resposta directa) ou 'tool_calls' (pedido
     de ferramenta), consoante o modelo decidir.
@@ -95,7 +99,7 @@ def ollama_chat(messages: list, ferramentas: list = None, memorias_usadas: list 
     return data["message"]
 
 
-def build_system_prompt(pedido: str, tenant_id: str = None):
+def build_system_prompt(pedido: str, tenant_id: str | None = None):
     tenant_id = tenant_id or config.TENANT_PADRAO
     partes = [config.CORE_IDENTITY]
     relevantes = pgmemory.retrieve(pedido, tenant_id=tenant_id)
@@ -120,7 +124,7 @@ def build_system_prompt(pedido: str, tenant_id: str = None):
 MAX_VOLTAS_FERRAMENTAS = 5
 
 
-def nova_sessao(tenant_id: str = None) -> dict:
+def nova_sessao(tenant_id: str | None = None) -> dict:
     """Estado de uma conversa (9 Ago 2026). Três campos:
       - "tenant_id": de que cliente é esta conversa — nunca lê nem
         grava memória fora deste tenant (isolamento testado em
@@ -145,7 +149,7 @@ def nova_sessao(tenant_id: str = None) -> dict:
     }
 
 
-def _destilar(buffer_destilar: list, tenant_id: str = None) -> None:
+def _destilar(buffer_destilar: list, tenant_id: str | None = None) -> None:
     """Pede ao próprio modelo para extrair, do excerto recente de
     conversa, só os factos concretos que valham a pena persistir.
     Mesmo princípio do PG_MEMORY_MIN_SCORE em pgmemory.py: se não
@@ -204,7 +208,7 @@ def _destilar(buffer_destilar: list, tenant_id: str = None) -> None:
         pgmemory.store(linha, tenant_id=tenant_id)
 
 
-def responder(pedido: str, sessao: dict = None) -> str:
+def responder(pedido: str, sessao: dict | None = None) -> str:
     """Sessao opcional — se não for dada, comporta-se como antes
     (sem memória de curto/longo prazo entre chamadas, cada pedido é
     uma ilha). Passar a mesma sessao entre chamadas é o que liga a
@@ -254,6 +258,22 @@ def responder(pedido: str, sessao: dict = None) -> str:
             f"({MAX_VOLTAS_FERRAMENTAS}) sem chegar a uma resposta final. "
             f"Tentativas: {'; '.join(tentativas)}"
         )
+
+    # Fase de testes (9 Ago 2026, a pedido do utilizador): grava a
+    # conversa real (pergunta+resposta), não só métricas — para o
+    # utilizador e o Claude poderem reler depois o que se passou de
+    # facto. Ficheiro à parte de LOG_FILE, ver CONVERSATION_LOG_FILE em
+    # config.py para o porquê. Remover esta chamada (e o ficheiro) no
+    # fim da fase de testes é o suficiente para desligar isto.
+    _log(
+        {
+            "timestamp": time.time(),
+            "tenant_id": sessao["tenant_id"],
+            "pedido": pedido,
+            "resposta": resposta,
+        },
+        caminho=config.CONVERSATION_LOG_FILE,
+    )
 
     # Só o par pergunta/resposta final entra na memória de conversa —
     # o vaivém interno das ferramentas é descartado, era só andaime
