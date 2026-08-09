@@ -282,3 +282,69 @@ configuração morta, do mesmo tipo dos cron jobs encontrados na revisão
 de backups — não decidia nada, só enganava quem olhasse para lá a
 pensar que estava a ter efeito. Remoção pedida ao utilizador (precisa
 de `sudo` com password, não corre em modo não-interactivo).
+
+**Esclarecimento importante, discutido com o utilizador depois desta
+revisão:** `num_ctx` não é uma torneira de economia de tokens — testado
+ao vivo o mesmo pedido trivial com `num_ctx` entre 2048 e 32768: tokens
+gastos e tempo de resposta ficaram *idênticos* em todos os valores
+(`prompt_eval_duration_s` ~0.45s, `eval_duration_s` ~0.03s, sempre).
+`num_ctx` só entra em jogo quando o que está realmente a ser usado se
+aproxima do tecto — é um tecto de segurança, não um travão do dia-a-
+-dia. Confundir os dois leva à tentação errada de o manter pequeno
+"para poupar", quando na prática isso só troca uma resposta mais longa
+por uma falha silenciosa (o bug documentado acima).
+
+---
+
+## Memória de conversa — curto prazo + destilação automática (9 Ago 2026)
+
+**O problema real que motivou isto:** até aqui, cada `responder()`
+começava do zero — nenhuma troca da conversa actual sobrevivia à
+seguinte (confirmado a olhar para `main()`: não guardava nada entre
+iterações do `while`). Não era "económico", era memória zero — o
+agente não conseguia ter uma conversa, só respostas isoladas.
+
+**Duas estruturas com propósitos diferentes, ambas na `sessao` (dict
+devolvido por `nova_sessao()`, passado a cada `responder()`):**
+- `historico` — janela fixa (`MEMORIA_CURTO_PRAZO_TROCAS=4` trocas),
+  sempre enviada ao modelo, desliza (trocas antigas saem do prompt).
+  Dá coerência imediata sem o prompt crescer sem parar.
+- `buffer_destilar` — acumula as mesmas trocas até
+  `MEMORIA_DESTILAR_A_CADA_TROCAS=6`, altura em que o próprio modelo é
+  chamado para resumir o que vale a pena persistir, grava em
+  `memory/*.md` (mesmo mecanismo RAG já existente) e o buffer é
+  limpo. Decisão do utilizador: automático, não à espera de um
+  comando — risco aceite de poder gravar ruído, mitigado como abaixo.
+
+**Testado: coerência de curto prazo funciona.** "O meu projecto
+chama-se DaazPrisma e uso Python 3.12" seguido de "qual é o nome do
+meu projecto e que versão de Python uso?" — respondeu certo aos dois,
+usando só a janela curta (sem tocar em memória persistente).
+
+**BUG REAL na destilação, encontrado e corrigido:** primeira versão do
+prompt de destilação, testada com "prefiro sempre respostas em
+português europeu, nunca brasileiro" seguido de "qual é a capital de
+Portugal?" — gravou **"A capital de Portugal é Lisboa"** (trivial, o
+modelo já sabe isto, redundante) e **ignorou** a preferência real do
+utilizador, que era o único facto que valia a pena guardar. Confirmado
+que a resposta "correcta" que veio a seguir numa sessão nova
+("português de Portugal") não veio da memória — `memory.retrieve()`
+devolveu zero resultados para essa pergunta, foi só o modelo a
+adivinhar bem pelo contexto geral da conversa (podia ter adivinhado
+mal). **Correcção:** prompt de destilação reescrito para pedir
+explicitamente factos "sobre o utilizador, o projecto ou decisões
+tomadas na conversa", com um exemplo do que extrair e um exemplo do
+que NÃO extrair (conhecimento geral). Reteste com o mesmo par de
+frases: gravou só a preferência, ignorou correctamente a trivialidade.
+
+**Achado extra, ainda por resolver (não é bug novo — é o aviso que já
+estava escrito em `memory.py` desde 8 Ago, agora confirmado com um
+caso real):** a memória da preferência, depois de gravada, ficou com
+pontuação **0.579** para a pergunta "em que variante do português devo
+responder?" — abaixo do `MEMORY_MIN_SCORE=0.6` por uma margem mínima
+(0.021), apesar de semanticamente relevante (0.72) e com sobreposição
+de palavras real ("português" nos dois). Ficou de fora por pouco.
+Decisão: não mexer no threshold com base num único caso (risco de
+sobreajustar a um exemplo só) — fica documentado como confirmação real
+do aviso já existente, para revisitar quando houver mais casos reais
+acumulados, não um ajuste reactivo agora.

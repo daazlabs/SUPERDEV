@@ -137,3 +137,27 @@ MEMORY_PESO_PALAVRAS = 0.3
 # injectada engana o modelo mais do que não ter memória nenhuma.
 # Valor de arranque, por afinar com uso real (ver logs/).
 MEMORY_MIN_SCORE = 0.6
+
+# --- Memória de conversa (curto e longo prazo, 9 Ago 2026) ---------------
+# Objectivo: conversas longas sem ficarem cada vez mais caras. O erro
+# óbvio seria reenviar a conversa toda a cada pedido (cresce sem
+# parar) — em vez disso, janela curta sempre presente + destilação
+# automática para memória persistente, para nunca ser preciso reler o
+# histórico todo. `num_ctx` (acima) fica generoso de propósito — não é
+# ele que controla a economia, é este mecanismo. Ver HISTORICO.md.
+
+# Curto prazo: quantas trocas (pergunta+resposta) da conversa actual
+# ficam sempre no pedido, para dar coerência imediata. Fixo, não
+# cresce — janela desliza, trocas mais antigas saem. Valor de arranque,
+# por afinar com uso real.
+MEMORIA_CURTO_PRAZO_TROCAS = 4
+
+# Longo prazo: de quantas em quantas trocas o agente tenta destilar a
+# conversa recente em memória persistente (memory/*.md), com o mesmo
+# modelo. AUTOMÁTICO por decisão do utilizador (não à espera de um
+# comando explícito) — risco conhecido: pode gravar ruído se não
+# houver nada relevante na janela destilada. Mitigado pedindo ao
+# modelo para responder literalmente "NADA" quando não há nada que
+# valha a pena — preferimos não gravar a gravar lixo, mesmo princípio
+# do MEMORY_MIN_SCORE acima. Valor de arranque, por afinar com uso real.
+MEMORIA_DESTILAR_A_CADA_TROCAS = 6

@@ -104,18 +104,107 @@ def build_system_prompt(pedido: str):
 MAX_VOLTAS_FERRAMENTAS = 5
 
 
-def responder(pedido: str) -> str:
-    system, memorias_usadas = build_system_prompt(pedido)
+def nova_sessao() -> dict:
+    """Estado de uma conversa (9 Ago 2026). Duas estruturas distintas,
+    propósitos diferentes:
+      - "historico": janela de curto prazo, tamanho fixo
+        (config.MEMORIA_CURTO_PRAZO_TROCAS), sempre enviada ao modelo
+        para dar coerência à conversa actual. Desliza — trocas antigas
+        saem daqui e desaparecem do prompt, mas não se perdem de vez
+        (ver "buffer_destilar").
+      - "buffer_destilar": acumula as mesmas trocas até chegar a
+        config.MEMORIA_DESTILAR_A_CADA_TROCAS, altura em que são
+        resumidas e gravadas em memory/*.md (memória persistente), e o
+        buffer é limpo. Existe separado do "historico" precisamente
+        para que uma troca não se perca sem ser avaliada para memória
+        de longo prazo só porque já saiu da janela curta.
+    """
+    return {"historico": [], "buffer_destilar": []}
+
+
+def _gravar_memoria(facto: str) -> None:
+    """Grava um facto destilado como novo ficheiro em memory/ — mesmo
+    formato dos ficheiros escritos à mão (texto simples, um facto por
+    ficheiro). Nome não é significativo (timestamp), quem decide
+    relevância é o embedding/palavras-chave em memory.retrieve, não o
+    nome do ficheiro."""
+    os.makedirs(config.MEMORY_DIR, exist_ok=True)
+    nome = f"conversa_{int(time.time() * 1000)}.md"
+    with open(os.path.join(config.MEMORY_DIR, nome), "w") as f:
+        f.write(facto.strip() + "\n")
+
+
+def _destilar(buffer_destilar: list) -> None:
+    """Pede ao próprio modelo para extrair, do excerto recente de
+    conversa, só os factos concretos que valham a pena persistir.
+    Mesmo princípio do MEMORY_MIN_SCORE em memory.py: se não houver
+    nada relevante, o modelo pode (e deve) dizer 'NADA' — preferimos
+    não gravar nada a gravar ruído com ar de importante."""
+    transcript = "\n".join(
+        f"{'Utilizador' if m['role'] == 'user' else 'Agente'}: {m['content']}"
+        for m in buffer_destilar
+    )
+    prompt_destilacao = (
+        "Eis um excerto recente de uma conversa. Extrai SÓ os factos "
+        "sobre O UTILIZADOR, O PROJECTO ou DECISÕES tomadas na "
+        "conversa — coisas que só fazem sentido guardar porque vieram "
+        "desta conversa em concreto (preferências ditas pelo "
+        "utilizador, nomes/versões/dados do projecto dele, escolhas "
+        "feitas). NUNCA extraias conhecimento geral que o modelo já "
+        "sabe de qualquer forma (capitais, definições, factos "
+        "públicos) — isso não vale a pena guardar, é redundante.\n\n"
+        "Exemplo do que EXTRAIR: 'O utilizador prefere respostas em "
+        "português europeu, nunca brasileiro.'\n"
+        "Exemplo do que NÃO extrair: 'A capital de Portugal é Lisboa' "
+        "(conhecimento geral, não é sobre o utilizador nem a conversa).\n\n"
+        "Uma frase curta e autocontida por facto, uma por linha, em "
+        "português. Nunca inventes nada que não esteja no excerto. Se "
+        "não houver nenhum facto sobre o utilizador/projecto/decisão "
+        "que valha a pena guardar, responde exactamente: NADA\n\n"
+        f"--- excerto da conversa ---\n{transcript}"
+    )
     mensagens = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": pedido},
+        {
+            "role": "system",
+            "content": (
+                "Sê extremamente literal e conciso. Não elabores, não "
+                "inventes, não repitas a instrução."
+            ),
+        },
+        {"role": "user", "content": prompt_destilacao},
+    ]
+    resposta = ollama_chat(mensagens, memorias_usadas=[])
+    texto = (resposta.get("content") or "").strip()
+    if not texto or texto.upper() == "NADA":
+        return
+    for linha in texto.splitlines():
+        linha = linha.strip("-• ").strip()
+        if not linha or linha.upper() == "NADA":
+            continue
+        _gravar_memoria(linha)
+
+
+def responder(pedido: str, sessao: dict = None) -> str:
+    """Sessao opcional — se não for dada, comporta-se como antes
+    (sem memória de curto/longo prazo entre chamadas, cada pedido é
+    uma ilha). Passar a mesma sessao entre chamadas é o que liga a
+    conversa."""
+    if sessao is None:
+        sessao = nova_sessao()
+
+    system, memorias_usadas = build_system_prompt(pedido)
+    janela = sessao["historico"][-(config.MEMORIA_CURTO_PRAZO_TROCAS * 2):]
+    mensagens = [{"role": "system", "content": system}] + janela + [
+        {"role": "user", "content": pedido}
     ]
 
+    resposta = None
     for _ in range(MAX_VOLTAS_FERRAMENTAS):
         mensagem = ollama_chat(mensagens, ferramentas=tools.TOOL_DEFS, memorias_usadas=memorias_usadas)
 
         if not mensagem.get("tool_calls"):
-            return mensagem.get("content", "")
+            resposta = mensagem.get("content", "")
+            break
 
         mensagens.append(mensagem)
         for chamada in mensagem["tool_calls"]:
@@ -128,14 +217,32 @@ def responder(pedido: str) -> str:
                 resultado = f"[ERRO] ferramenta desconhecida: {nome}"
             mensagens.append({"role": "tool", "content": resultado})
 
-    return (
-        "[ERRO] Excedi o limite de voltas de ferramentas "
-        f"({MAX_VOLTAS_FERRAMENTAS}) sem chegar a uma resposta final."
-    )
+    if resposta is None:
+        resposta = (
+            "[ERRO] Excedi o limite de voltas de ferramentas "
+            f"({MAX_VOLTAS_FERRAMENTAS}) sem chegar a uma resposta final."
+        )
+
+    # Só o par pergunta/resposta final entra na memória de conversa —
+    # o vaivém interno das ferramentas é descartado, era só andaime
+    # para chegar a esta resposta, não vale a pena lembrar.
+    troca = [
+        {"role": "user", "content": pedido},
+        {"role": "assistant", "content": resposta},
+    ]
+    sessao["historico"] = (sessao["historico"] + troca)[-(config.MEMORIA_CURTO_PRAZO_TROCAS * 2):]
+    sessao["buffer_destilar"].extend(troca)
+
+    if len(sessao["buffer_destilar"]) >= config.MEMORIA_DESTILAR_A_CADA_TROCAS * 2:
+        _destilar(sessao["buffer_destilar"])
+        sessao["buffer_destilar"] = []
+
+    return resposta
 
 
 def main():
     print("SUPERDEV — escreve o teu pedido (Ctrl+C para sair)\n")
+    sessao = nova_sessao()
     while True:
         try:
             pedido = input("> ").strip()
@@ -144,7 +251,7 @@ def main():
             break
         if not pedido:
             continue
-        print(f"\n{responder(pedido)}\n")
+        print(f"\n{responder(pedido, sessao)}\n")
 
 
 if __name__ == "__main__":
