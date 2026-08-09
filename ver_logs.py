@@ -21,7 +21,7 @@ import config
 def _formatar(d: dict) -> str:
     hora = time.strftime("%H:%M:%S", time.localtime(d["timestamp"]))
     ferramenta = "chamou ferramenta" if d["pediu_ferramenta"] else "resposta final"
-    return (
+    linha = (
         f"[{hora}] {ferramenta:<18} | "
         f"tokens: {d.get('prompt_eval_count', '?'):>4} entrada + "
         f"{d.get('eval_count', '?'):>4} saída | "
@@ -29,6 +29,12 @@ def _formatar(d: dict) -> str:
         f"(geração {d.get('eval_duration_s', 0):.2f}s) | "
         f"memórias usadas: {len(d.get('memorias_usadas', []))}"
     )
+    # nome + argumentos de cada ferramenta pedida nesta volta (9 Ago
+    # 2026) — sem isto, um ciclo preso em MAX_VOLTAS_FERRAMENTAS era
+    # impossível de diagnosticar em tempo real
+    for tc in d.get("ferramentas_pedidas", []):
+        linha += f"\n            └─ {tc['nome']}({tc['args']})"
+    return linha
 
 
 def mostrar_ultimas(n: int) -> None:

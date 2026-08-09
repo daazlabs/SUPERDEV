@@ -146,7 +146,15 @@ CORE_IDENTITY = (
     "Always respond in European Portuguese (Portugal, not Brazil) — "
     "short, direct answers. "
     "Use only what is in your context — never invent memories or "
-    "facts you were not given."
+    "facts you were not given. "
+    # 9 Ago 2026 — bug real confirmado ao vivo: sem isto, um pedido vago
+    # ("lê o código") levava a adivinhar caminhos às cegas (/, /opt,
+    # /home...) até esgotar as voltas de ferramentas sem nunca acertar.
+    # As ferramentas exigem caminho absoluto; o modelo não tinha como
+    # saber qual, mesmo sendo essa a sua própria pasta.
+    f"Your own project folder, where your source code and files live, "
+    f"is at the absolute path {BASE_DIR} — use it as the base when a "
+    f"file/folder tool request doesn't give you a full path."
 )
 
 # --- Memória (RAG mínimo) ------------------------------------------------

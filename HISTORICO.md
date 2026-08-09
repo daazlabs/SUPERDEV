@@ -866,3 +866,60 @@ não pela interface a sério); se ficar bem, considerar systemd
 `--user` para o `server.py` sobreviver a reinícios, como o resto do
 ecossistema — não feito ainda, prematuro antes de validação com uso
 real.
+
+## Bug real de uso: ciclo preso a adivinhar caminhos + explicação confabulada (9 Ago 2026)
+
+Incidente real do utilizador, a conversar com o SUPERDEV no terminal:
+pediu "lê o código do sistema vectorial... é só leres!" (sem dar
+caminho) e recebeu `[ERRO] Excedi o limite de voltas de ferramentas
+(5) sem chegar a uma resposta final.` Ao perguntar "que erro foi
+esse?", o agente respondeu com uma explicação a soar plausível mas
+inventada ("gastei as minhas tentativas a tentar um por um").
+
+**Causa raiz nº1, confirmada ao vivo reproduzindo o pedido exacto**
+(`ver_logs.py` já mostrava nome+argumentos de cada ferramenta pedida,
+ver secção anterior): o modelo tentou, nesta ordem, `ler_ficheiro(/historico.md)`,
+`listar_ficheiros(/)`, `listar_ficheiros(/opt)`,
+`listar_ficheiros(/opt/DaazNexus)`, `listar_ficheiros(/home)` —
+**adivinhou caminhos absolutos pelo disco todo**, nunca chegou perto.
+Porquê: `CORE_IDENTITY` nunca dizia ao modelo onde vivia o próprio
+projecto; as ferramentas exigem caminho absoluto (`tools.py`
+`TOOL_DEFS`); um pedido vago sem essa informação não tinha como ter
+sucesso, para nenhum modelo deste tamanho ou maior — não era o modelo
+a "ser mau", era uma peça de contexto a faltar.
+
+**Causa raiz nº2, confirmada por leitura do código, não suposição**:
+`responder()` só guarda o par pergunta/resposta final em
+`sessao["historico"]` — "o vaivém interno das ferramentas é
+descartado" (decisão de desenho antiga, documentada acima). Quando o
+pedido falhava com o erro genérico, a próxima pergunta do utilizador
+("que erro foi esse?") chegava ao modelo **sem nenhuma informação
+real** sobre o que se tinha passado — só a frase do erro. A resposta
+"explicativa" que deu foi inventada a partir de conhecimento geral
+sobre o que esse tipo de erro costuma significar, não de memória real
+do que aconteceu (a mesma classe de problema já discutida com
+auto-crítica: o modelo preenche um vazio com uma história plausível em
+vez de admitir que não sabe).
+
+**Corrigido, testado ao vivo em ambas as partes, não só lido:**
+- `config.py` `CORE_IDENTITY` ganhou uma frase com `BASE_DIR` real
+  (`/mnt/sovereign/superdev`), instruindo o modelo a usá-lo como base
+  quando um pedido de ficheiro/pasta não vier com caminho completo.
+  Reteste com a pergunta exacta do utilizador: leu `HISTORICO.md` à
+  primeira tentativa, sem adivinhar nada.
+- `agent.py` `responder()`: quando o limite de voltas é excedido, a
+  mensagem de erro passou a incluir a lista real de tentativas
+  (`nome(args)` de cada chamada de ferramenta feita nessa volta) — como
+  essa mensagem é o que fica gravado em `historico`, uma pergunta
+  seguinte tipo "que erro foi esse?" passa a ter uma resposta com chão
+  verdadeiro, não inventado. Testado de forma determinística (não
+  dependente do modelo cooperar): `ollama_chat` substituído
+  temporariamente por uma função de teste que força sempre pedido de
+  ferramenta, confirmado que a mensagem final lista as 5 tentativas
+  simuladas na ordem certa.
+
+**Ainda por rever, não feito agora**: se um pedido genuinamente precisar
+de mais de 5 voltas de ferramentas (não um ciclo preso, uma tarefa real
+maior), `MAX_VOLTAS_FERRAMENTAS=5` corta-o na mesma — não distinguido
+dos dois casos. Fica para quando houver um caso real desse tipo, não
+antes.

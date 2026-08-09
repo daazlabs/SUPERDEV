@@ -71,6 +71,15 @@ def ollama_chat(messages: list, ferramentas: list = None, memorias_usadas: list 
         "memorias_usadas": memorias_usadas or [],
         "tinha_ferramentas": bool(ferramentas),
         "pediu_ferramenta": bool(data["message"].get("tool_calls")),
+        # Nome + argumentos de cada ferramenta pedida nesta volta — antes
+        # só se sabia "pediu ferramenta: sim/não", uma caixa negra quando
+        # um pedido ficava preso em MAX_VOLTAS_FERRAMENTAS (9 Ago 2026,
+        # incidente real: 5 voltas seguidas sem resposta, impossível saber
+        # qual ferramenta repetia sem isto).
+        "ferramentas_pedidas": [
+            {"nome": tc["function"]["name"], "args": tc["function"]["arguments"]}
+            for tc in (data["message"].get("tool_calls") or [])
+        ],
         "options": config.OPTIONS,
         "think": config.THINK,
         "thinking_tokens": len(data["message"].get("thinking", "")) if data["message"].get("thinking") else 0,
@@ -210,6 +219,7 @@ def responder(pedido: str, sessao: dict = None) -> str:
     ]
 
     resposta = None
+    tentativas = []  # ver comentário abaixo — só usado se o limite for excedido
     for _ in range(MAX_VOLTAS_FERRAMENTAS):
         mensagem = ollama_chat(mensagens, ferramentas=tools.TOOL_DEFS, memorias_usadas=memorias_usadas)
 
@@ -221,6 +231,7 @@ def responder(pedido: str, sessao: dict = None) -> str:
         for chamada in mensagem["tool_calls"]:
             nome = chamada["function"]["name"]
             args = chamada["function"]["arguments"]
+            tentativas.append(f"{nome}({args})")
             funcao = tools.FUNCOES.get(nome)
             if funcao:
                 resultado = funcao(**args)
@@ -229,9 +240,19 @@ def responder(pedido: str, sessao: dict = None) -> str:
             mensagens.append({"role": "tool", "content": resultado})
 
     if resposta is None:
+        # 9 Ago 2026 — antes só dizia "excedi o limite", sem detalhe
+        # nenhum. Bug real encontrado ao vivo: como só o par
+        # pergunta/resposta final entra em `historico` (o vaivém de
+        # ferramentas é descartado por desenho), um pedido seguinte tipo
+        # "que erro foi esse?" deixava o modelo SEM NENHUMA informação
+        # real sobre o que tinha tentado — e ele inventava uma resposta
+        # plausível em vez de admitir que não sabia. Incluir aqui o que
+        # foi tentado de facto corrige isso: fica gravado no histórico,
+        # por isso uma explicação a seguir é grounded, não confabulada.
         resposta = (
             "[ERRO] Excedi o limite de voltas de ferramentas "
-            f"({MAX_VOLTAS_FERRAMENTAS}) sem chegar a uma resposta final."
+            f"({MAX_VOLTAS_FERRAMENTAS}) sem chegar a uma resposta final. "
+            f"Tentativas: {'; '.join(tentativas)}"
         )
 
     # Só o par pergunta/resposta final entra na memória de conversa —
