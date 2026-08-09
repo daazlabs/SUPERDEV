@@ -348,3 +348,360 @@ Decisão: não mexer no threshold com base num único caso (risco de
 sobreajustar a um exemplo só) — fica documentado como confirmação real
 do aviso já existente, para revisitar quando houver mais casos reais
 acumulados, não um ajuste reactivo agora.
+
+---
+
+## Discussão de arquitectura para escala (9 Ago 2026) — decisões, não só notas
+
+Conversa mais longa com o utilizador sobre onde este projecto vai a
+seguir: o SUPERDEV não é só para uso pessoal, é para se tornar produto
+usado por empresas pequenas/médias/grandes, desenhado para aguentar
+crescimento de 10 anos sem precisar de reescrita total (referência
+directa de uma experiência real do utilizador numa empresa de
+telecomunicações: sistema para 1M de utilizadores atingiu 2M a fazer
+"remendos" e teve de ser reconstruído do zero por várias empresas
+contratadas). Isto muda o critério de decisão: não é "o que
+precisamos agora", é "que arquitectura aguenta desde o dia 1".
+
+**Medição de escala real, antes de decidir se precisamos de base de
+dados vectorial:** varrimento linear (o que o `memory.py` faz hoje,
+um `_cosine()` por ficheiro, em Python) — 100 factos: 0.5ms; 10.000
+factos: ~49ms; **100.000 factos: ~457ms**. Uma chamada normal ao
+modelo demora 1-20+ segundos. Calcular o embedding da pergunta em si
+(chamada à Ollama): ~70ms. Ou seja, mesmo a 100 mil factos, a
+pesquisa continua a ser uma fracção pequena do tempo total — não é o
+gargalo. Decisão inicial (antes de o utilizador corrigir o
+enquadramento): não vale a pena base de dados vectorial "ainda".
+
+**Correcção de enquadramento pedida pelo utilizador:** o critério não
+deve ser "resolve um problema que temos agora", deve ser "resolve o
+problema que vamos ter com múltiplos clientes, multi-tenant, a
+escalar". Aceite — a análise de velocidade acima continua válida, mas
+não é o critério de decisão certo sozinho; multi-tenant, isolamento
+entre clientes e pesquisa indexada por categoria são requisitos de
+produto, não optimizações prematuras.
+
+**Decisão de arquitectura: PostgreSQL + `pgvector`**, não ficheiros
+`.md` (para a versão "produto"/cliente — o `memory.py` actual continua
+válido como motor pessoal/desenvolvimento). Porquê esta e não Qdrant/
+Chroma/Milvus: já há Postgres a correr no ecossistema (DaazLeads,
+DaazRecover, cada um isolado no seu projecto, mesma regra de sempre);
+multi-tenant em Postgres é um padrão maduro há décadas (schemas /
+`tenant_id` indexado / row-level security); o produto de auditoria
+RGPD/EU AI Act do utilizador tem uma conversa de conformidade mais
+fácil com "Postgres" do que com uma base vectorial de nicho. FAISS
+(usado noutros projectos do utilizador) foi considerado e descartado
+para este papel — é uma biblioteca rápida para a matemática pura de
+vizinhos mais próximos, mas não dá multi-tenant, filtros SQL,
+backups/replicação de fábrica; tudo isso teria de ser construído à
+volta dele. `pgvector` dá o mesmo tipo de indexação (HNSW) dentro de
+um motor que já resolve o resto.
+
+**Ainda por fazer:** desenho do esquema (tabela de memórias com
+`tenant_id`, `categoria`, `texto`, `embedding vector(768)`, índice
+HNSW) e protótipo mínimo testado com dados reais — ainda não
+começado, é o próximo passo.
+
+### O teste decisivo: quem deve fazer a pesquisa — código ou o agente?
+
+Pergunta central do utilizador: é o agente que decide pesquisar (via
+ferramenta) ou o código que busca sempre, antes de sequer falar com o
+modelo? Testado ao vivo, mesma pergunta real ("em que porta corre o
+Ollama?", facto real gravado: 11435), dois caminhos:
+
+- **Caminho A — código busca sempre** (`memory.retrieve()` corre
+  incondicionalmente, é o que já fazemos): 1 chamada, 655 tokens,
+  6.37s, resposta **11435 — correcta**.
+- **Caminho B — ferramenta `pesquisar_memoria`, o modelo decide**:
+  1 chamada, 384 tokens, 1.32s, resposta **11434 — errada**. O modelo
+  nem chegou a pedir a ferramenta — respondeu com a porta por defeito
+  genérica da Ollama (conhecimento de treino), sem saber que esta
+  instalação em concreto foi configurada de forma diferente.
+
+**O caminho B foi mais rápido e mais barato — e errou.** Discutido com
+o utilizador se isto é "porque o modelo é pequeno/fraco" e se um
+modelo melhor resolveria sozinho, deixando de ser preciso forçar a
+busca no código. Conclusão a que chegámos: não é um problema de
+inteligência, é um problema de acesso à informação — nenhum modelo,
+por maior que seja, pode saber um facto específico desta instalação
+sem lhe ser dado; e um modelo maior tende a soar mais convincente a
+inventar, não menos, o que piora a detecção do erro, não melhora.
+É exactamente a razão pela qual "grounding"/RAG obrigatório é usado
+na indústria toda mesmo com os modelos mais caros e capazes que
+existem — não é workaround de modelo fraco.
+
+**Decisão de arquitectura (não vai mudar com modelos melhores):**
+factos específicos do cliente/projecto — busca sempre obrigatória no
+código, nunca ao critério do modelo. Raciocínio geral, código,
+explicações — o agente continua completamente livre, sem restrição
+nenhuma, e melhora sozinho com modelos melhores. Já tínhamos esta
+separação por instinto (`memory.retrieve()` obrigatório vs. ferramentas
+de ficheiro que o modelo escolhe) — ficou confirmada como a distinção
+certa: obrigatório para o que é sempre relevante e não descobrível por
+raciocínio; ao critério do agente só quando genuinamente não há como
+saber de antemão o quê procurar.
+
+### Português vs. inglês — onde poupa tokens a sério, testado
+
+Pedido do utilizador: tudo o que não for a conversa com o utilizador/
+cliente pode ir para inglês, se isso poupar tempo e tokens. Testado
+antes de aplicar às cegas:
+
+- **Comentários no código nunca custam nada** — confirmado a inspeccionar
+  o `system` enviado ao modelo, não contém nenhum `#` de comentário.
+  Não é alavanca nenhuma, é só documentação para humanos.
+- **Mesmo conteúdo, PT vs. EN, medido 2x com textos diferentes:** PT
+  usa **+13% a +15% mais tokens** que EN para dizer a mesma coisa,
+  neste tokenizer.
+- **Testado traduzir factos de memória para inglês — PARTIU a
+  pesquisa.** Facto gravado em inglês, pergunta em português: pontuação
+  de palavras-chave caiu para **0.000** (nenhuma palavra em comum) e a
+  semântica também caiu (0.538, mais baixa que o normal). Score final
+  0.377, bem abaixo do `MEMORY_MIN_SCORE=0.6` — memória perdida por
+  completo. **Decisão: factos de memória ficam em português**, o custo
+  de +15% aqui é o preço real de operar em português, não desperdício
+  a cortar.
+- **Descrições de ferramentas (`tools.py` `TOOL_DEFS`) traduzidas para
+  inglês** — nunca comparadas por palavras-chave, só lidas pelo
+  modelo. Medido: 16 tokens poupados por pedido (~3%), repete em cada
+  volta do ciclo de ferramentas. Aplicado.
+- **`CORE_IDENTITY` (`config.py`) traduzido para inglês**, com
+  instrução explícita "responde sempre em português europeu". Testado:
+  continua a responder em português mesmo quando a pergunta do
+  utilizador foi escrita em inglês — instrução a "pegar" bem.
+  Poupança medida: só 1 token (texto curto, a percentagem de 13-15%
+  em números absolutos pequenos não dá muito) — aplicado por ser
+  grátis e correcto, não por ser a maior poupança.
+- **Prompt de destilação (`agent._destilar`) traduzido para inglês**,
+  mas a EXIGIR explicitamente que os factos extraídos saiam em
+  português (a mesma razão do ponto acima sobre memória). Retestado
+  com o mesmo par de frases (preferência real + trivialidade da
+  capital): continuou a extrair só o facto certo, em português.
+
+**Regra geral que ficou destas experiências:** o idioma da instrução
+é livre (grátis trocar para inglês); o idioma do que fica guardado ou
+é comparado por palavras-chave tem de continuar em português, porque
+é isso que vai ser perguntado no futuro.
+
+---
+
+## Protótipo `pgvector` construído e testado (9 Ago 2026)
+
+Infra-estrutura nova, isolada, mesma regra de sempre (rede/volume/.env
+próprios, porta só em `127.0.0.1`): `db/docker-compose.yml` (imagem
+`pgvector/pgvector:pg16`), container `superdev-postgres`, porta
+**5443** (5440 e 5442 já reservadas a outros projectos). Esquema em
+`db/init/001_schema.sql`: tabela `memorias` com `tenant_id`,
+`categoria`, `texto`, `embedding vector(768)`, coluna gerada
+`texto_tsv` (full-text search nativo em português), índice **HNSW**
+sobre o embedding, índices normais sobre `tenant_id` e
+`(tenant_id, categoria)`, índice GIN sobre `texto_tsv`. Módulo Python
+novo, `pgmemory.py` — mesma interface do `memory.py` (`retrieve()`
+devolve `(score, id, texto)`), reutiliza `memory._embed()` (a régua
+não muda, só onde os números ficam guardados).
+
+**Sem o pacote `pgvector-python`** — o resto do projecto corre sem
+venv, com pacotes já existentes no sistema (`psycopg` já estava
+instalado); vectores formatados à mão como texto `'[v1,v2,...]'` com
+`::vector` no SQL, evita mais uma dependência nova.
+
+**BUG DE CALIBRAÇÃO encontrado e corrigido:** o `ts_rank` nativo do
+Postgres não está na escala 0-1 da sobreposição de palavras calculada
+à mão no `memory.py` antigo — valores típicos ficam entre 0.0 e 0.22.
+Reaproveitar `MEMORY_MIN_SCORE=0.6` às cegas fazia o `retrieve()`
+devolver **sempre vazio**, mesmo quando o facto certo estava
+correctamente em 1º lugar (confirmado: pergunta sobre a GPU, facto
+certo rankeado primeiro com score 0.468, mas 0.6 exigido — nada
+passava). Corrigido com um `PG_MEMORY_MIN_SCORE` próprio (não reusa o
+`MEMORY_MIN_SCORE` do motor antigo), calibrado com dados reais: 4
+perguntas claramente irrelevantes pontuaram 0.40-0.43; 5 perguntas
+com facto real relevante pontuaram 0.47-0.60. Threshold escolhido:
+**0.45**, na margem entre os dois grupos. Retestado com os 9 casos
+(5 relevantes + 4 irrelevantes): **9/9 certos** — nem falso positivo
+nem falso negativo.
+
+**Isolamento multi-tenant testado com um caso deliberadamente
+sensível:** gravado um facto fictício ("CEO da Empresa XPTO ganha
+8000€/mês") sob `tenant_id='cliente_xpto'`. Pesquisado esse mesmo
+facto sob `tenant_id='default'` e sob um terceiro tenant qualquer —
+**nunca apareceu fora do seu próprio tenant**, confirmado a olhar
+directamente para os resultados devolvidos, não só a confiar no
+`WHERE`. O que apareceu sob `default` foram dois factos *do próprio*
+tenant, sem relação com "CEO", só por coincidência acima do threshold
+(0.468 e 0.452 — mesmo em cima da margem) — não é fuga de dados, é o
+mesmo aviso de precisão já conhecido, a confirmar-se também aqui.
+
+**Teste de escala real — a prova do "vai direto lá, não leias tudo":**
+inseridos 50.000 factos sintéticos (vectores aleatórios, 5 categorias)
+via `COPY` (inserção em massa demorou ~250s, dominado pela construção
+do índice HNSW à medida que os dados entram — custo pago uma vez, na
+escrita, não na leitura). Com o modelo de embedding "aquecido"
+(primeira chamada ~50ms fria, chamadas seguintes ~16ms — o mesmo
+custo de arranque existe também no `memory.py` antigo, não é
+específico disto):
+
+| Pesquisa | Linhas na tabela | Tempo |
+|---|---|---|
+| `tenant=default` (5 factos reais, entre 50 mil) | 50.005 | ~9ms |
+| `stress_test` + categoria='tecnologia' (10 mil) | 50.000 | ~15ms |
+| `stress_test` sem categoria, só HNSW (50 mil) | 50.000 | ~13ms |
+
+Para comparação, o varrimento linear em Python medido antes (sem
+índice nenhum) foi ~450ms a 100 mil linhas. Confirmado: o índice HNSW
+não varre a tabela, o tempo não cresce por aí a fora com o número de
+linhas — é a diferença real entre "ele sabe onde estão as cebolas" e
+"lê tudo à procura delas".
+
+**Dados de teste (stress_test, cliente_xpto) removidos depois dos
+testes** — só ficam os 5 factos reais migrados do `memory.py`.
+
+**Categorização automática — decisão tomada (9 Ago 2026): NÃO fazer
+por agora.** Discutido: a categoria ajuda organização/precisão, mas o
+próprio teste de escala mostrou que a 50 mil linhas o HNSW sozinho
+(13.3ms) foi tão rápido como filtrar por categoria antes (15.6ms) —
+não é questão de velocidade a esta escala. Decidir uma lista fixa de
+categorias sem dados reais de vários clientes seria apostar às cegas;
+deixar o modelo inventar categorias livremente arrisca o mesmo
+problema de inconsistência já visto nesta sessão (nomes diferentes
+para a mesma coisa). Coluna `categoria` fica na tabela, por preencher,
+para decidir com casos reais mais tarde.
+
+**`pgmemory.py` ligado ao `agent.py` a sério (9 Ago 2026) — já não é
+só um protótipo isolado.** Mudanças: `DB_DSN` centralizado em
+`config.py` (deixou de estar hardcoded em `pgmemory.py`);
+`build_system_prompt()` e a destilação (`_destilar`) passaram de
+`memory.retrieve()`/gravação em ficheiro para `pgmemory.retrieve()`/
+`pgmemory.store()`; `nova_sessao()` ganhou um `tenant_id` (por omissão
+`config.TENANT_PADRAO="default"`), passado a partir daí a tudo o que
+lê ou grava memória nessa conversa. `memory.py`/`memory/*.md` deixam
+de ser usados ao vivo pelo agente — ficam como registo histórico (os
+5 factos já foram migrados para o Postgres antes).
+
+Testado ponta-a-ponta depois da troca: pesquisa real via Postgres
+através do `agent.responder()` (não só chamando `pgmemory`
+directamente) respondeu certo sobre a GPU; destilação automática
+gravou um facto novo ("Projecto Fénix") sob um tenant de teste, e uma
+sessão de outro tenant a perguntar a mesma coisa **não soube
+responder** — isolamento confirmado através do fluxo real do agente,
+não só da base de dados isolada; memória de curto prazo e de longo
+prazo testadas a funcionar juntas na mesma conversa ("que bug
+aconteceu no DaazNexus?" seguido de "e foi corrigido?" — a segunda
+pergunta só faz sentido com a janela curta a funcionar). Dados de
+teste limpos, ficam só os 5 factos reais, todos sob `tenant_id=
+'default'`.
+
+**Por fazer:** credenciais em `db/.env`/`config.DB_DSN` são só de
+desenvolvimento local, por rever antes de qualquer deployment a
+sério.
+
+---
+
+## Pool de ligações — fechado o gap de velocidade (9 Ago 2026)
+
+Comparação directa pedida pelo utilizador: à escala de hoje (5
+factos), o `memory.py` antigo (ficheiros) era mais rápido que o
+`pgmemory.py` novo (~19ms vs. ~29ms) — confirmado ao vivo, não
+escondido. Causa isolada: abrir uma ligação nova à Postgres a cada
+pesquisa custava ~7.8ms sozinho (medido à parte) — o ficheiro antigo
+não paga isto, é só ler um dicionário já em memória.
+
+**Corrigido com `psycopg_pool.ConnectionPool`** (já instalado no
+sistema, sem dependência nova): uma pool aberta uma vez
+(`min_size=1, max_size=5`), reutilizada em todas as chamadas de
+`store()`/`retrieve()`, em vez de `psycopg.connect()` a abrir e fechar
+por pedido. Reteste depois da correcção: **15.8ms (novo) vs. 16.3ms
+(antigo)** — praticamente empatados à escala pequena, mantendo a
+vantagem de dezenas de vezes a escalas maiores (13-16ms a 50 mil
+factos, já medido antes). Confirmado também ponta-a-ponta através do
+`agent.responder()` real, sem regressões.
+
+## Comparação com os outros agentes do utilizador (DAAZLABS Audit, Hermes PT)
+
+Pedido do utilizador: comparar com o RAG de dois agentes já existentes
+(FAISS + chunks). Medido ao vivo, não por documentação:
+
+- **DAAZLABS Audit** (FAISS `IndexFlatL2`, 1.304 chunks, modelo e
+  índice em cache em memória, `sentence-transformers` local): ~19ms
+  por pesquisa, depois de ~4.1s de carregamento inicial (uma vez só).
+- **Hermes PT** (`rag_laboral_pt`, FAISS `IndexFlatL2`, **65.627**
+  vectores): **~287ms** por pesquisa — muito mais lento, mas não pela
+  tecnologia. Decomposto: ler o índice do disco 75.6ms, ler
+  `documents.pkl`/`metadatas.pkl` do disco 187.7ms, chamar o serviço
+  de embeddings partilhado 28.4ms, **a pesquisa vectorial em si só
+  6.5ms**. O código relê tudo do disco em cada chamada, nunca
+  guarda em memória entre pedidos — mesma classe de problema do
+  connection-per-request que corrigimos aqui, só que maior impacto
+  (~270ms perdidos em vez de ~8ms).
+- **Conclusão que ficou clara desta comparação:** a escolha da
+  tecnologia (FAISS vs. Postgres/pgvector vs. ficheiros) importa menos
+  para a velocidade real do que a qualidade da implementação (cache,
+  evitar E/S repetida). FAISS exacto, bem implementado, é rapidíssimo
+  mesmo sem índice aproximado (6.5ms a 65 mil vectores). O `pgvector`
+  ganha à mesma escala (13-16ms) por já vir com indexação HNSW e não
+  precisar de recarregar tudo para memória.
+
+## Discussão: aplicar isto ao Hermes PT? (9 Ago 2026)
+
+O Hermes PT tem um problema real de performance (a leitura do disco
+em cada pedido, acima) — correcção recomendada, independente de
+qualquer decisão maior, mesmo padrão do pool de ligações aqui.
+
+Sobre migrar o Hermes para `pgvector`: esclarecido com o utilizador
+que o Hermes vai ser um serviço pago, no site, onde clientes enviam
+documentos e dados privados de casos jurídicos (área inicial: direito
+civil e imobiliário), com validação humana da empresa de advocacia
+antes de qualquer resposta sair. **Isto é exactamente o cenário
+multi-tenant que este esquema resolve** — o Hermes hoje não tem
+nenhum isolamento por cliente (um índice FAISS partilhado por tudo).
+Decisão: não construir agora dentro desta sessão (é trabalho com peso
+próprio — pipeline de ingestão de documentos, interface de chat no
+site, fluxo de validação humana, segurança à altura de dados pessoais/
+sigilo profissional) — mas confirma que a arquitectura construída hoje
+para o SUPERDEV generaliza como planeado desde o início do projecto.
+Fica registado como próximo grande projecto, com sessão de desenho
+própria quando for a vez.
+
+---
+
+## Segurança: password da BD quase commitada para repositório público (9 Ago 2026)
+
+Ao rever as credenciais da BD (pedido do utilizador, última tarefa
+pendente da lista), descoberto que o `SUPERDEV` é um repositório git
+com remote `https://github.com/daazlabs/SUPERDEV.git`, **público**
+(confirmado com `gh repo view`). `config.py` já tinha sido commitado
+2 vezes antes de hoje; a versão de hoje, com a password da BD escrita
+directamente numa string (`DB_DSN = "...password=..."`), ainda **não**
+tinha sido commitada nem enviada — apanhada a tempo, confirmado com
+`git log`/`git diff` antes de qualquer `git add`.
+
+**Também descoberto, já público nos 2 commits enviados anteriormente:**
+`memory/_index.json` (cache de embeddings — inclui o texto dos 5
+factos internos: GPU/VRAM, bugs, preferência do utilizador, dados do
+DaazLeads) e `logs/chamadas.jsonl` (log de pedidos). Inspeccionado o
+conteúdo antes de reagir: o log só grava métricas (tamanhos, tokens,
+tempos, scores) — **nunca o texto real de perguntas ou respostas**;
+o `_index.json` não tem passwords nem dados pessoais, só os factos já
+conhecidos. Não é grave, mas não devia estar num repo público —
+corrigido para a frente (ver abaixo); o histórico já enviado não foi
+reescrito (decisão do utilizador, não decidida por mim).
+
+**Corrigido:**
+- `config.py` deixou de ter a password escrita — carrega agora
+  `db/.env` via `python-dotenv` (já disponível no sistema, sem
+  dependência nova), falha de forma clara (`KeyError`) se faltar.
+- `.gitignore` novo: `db/.env`, `__pycache__/`, `*.pyc`,
+  `memory/_index.json`, `logs/*.jsonl`.
+- `git rm --cached` nos ficheiros que já estavam a ser seguidos por
+  engano (`__pycache__/*.pyc`, `memory/_index.json`,
+  `logs/chamadas.jsonl`) — continuam no disco, só deixam de ir para o
+  próximo commit.
+- Retestado ponta-a-ponta depois da mudança: `config.DB_DSN` continua
+  a montar-se correctamente, `agent.responder()` continua a falar com
+  a BD sem problemas.
+
+**Por decidir com o utilizador:** se vale a pena reescrever o
+histórico do git para tirar `memory/_index.json`/`logs/chamadas.jsonl`
+dos 2 commits já públicos (mais invasivo, muda hashes de commit) — não
+feito sem essa decisão explícita. Alterações de hoje ficaram só
+preparadas (`git add`), não commitadas nem enviadas — por pedido
+explícito de nunca commitar/enviar sem confirmação.

@@ -1,0 +1,17 @@
+# Segredos — nunca no git (ver HISTORICO.md, 9 Ago 2026: a password da
+# BD quase foi commitada para o repositório público antes disto existir)
+db/.env
+.env
+
+# Bytecode Python — já estava a ser seguido por engano, não devia
+__pycache__/
+*.pyc
+
+# Cache de embeddings do memory.py — regenerável, e junto com ele vão
+# os textos dos factos guardados (internos, não secretos, mas também
+# não pertencem a um repositório público)
+memory/_index.json
+
+# Logs de execução — só métricas (nunca o texto real das conversas,
+# confirmado), mas mesmo assim não é código-fonte, não pertence ao git
+logs/*.jsonl

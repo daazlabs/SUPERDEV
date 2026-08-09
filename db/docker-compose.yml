@@ -1,0 +1,43 @@
+# SUPERDEV — Postgres + pgvector, pilha independente.
+#
+# Mesma regra de sempre neste servidor: nada partilhado com outros
+# projectos. Rede própria, volume próprio, .env próprio. Porta ligada
+# a 127.0.0.1 de propósito (não 0.0.0.0) — uma porta publicada em
+# 0.0.0.0 fica acessível pela internet mesmo com o ufw a negar tudo,
+# como já aconteceu noutros projectos deste ecossistema.
+#
+#   docker compose up -d
+#   docker compose logs -f postgres
+
+name: superdev
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: superdev-postgres
+    restart: unless-stopped
+    networks: [superdev]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    ports:
+      - "127.0.0.1:5443:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  superdev:
+
+volumes:
+  pgdata:

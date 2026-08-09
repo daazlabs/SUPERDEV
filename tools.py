@@ -139,18 +139,28 @@ def procurar_texto(caminho: str, termo: str) -> str:
 # Definições no formato nativo da Ollama (compatível com a convenção
 # OpenAI de function-calling) — é isto que vai no campo "tools" do
 # pedido à API.
+#
+# TEXTO EM INGLÊS DE PROPÓSITO (9 Ago 2026) — decisão testada, não
+# esquecimento: isto nunca é visto pelo utilizador, só é lido pelo
+# modelo para saber o que as ferramentas fazem. Medido ao vivo: ~3%
+# menos tokens por pedido com ferramentas oferecidas (e isto repete em
+# cada volta do ciclo) sem alterar nada da conversa em português. Os
+# nomes das funções (`name`) e dos parâmetros ficam como estão
+# (`ler_ficheiro`, `caminho`, etc.) — mudar isso obrigaria a
+# revalidar todo o tools.py (ver aviso no topo do ficheiro), o texto
+# livre de "description" não tem esse risco.
 TOOL_DEFS = [
     {
         "type": "function",
         "function": {
             "name": "ler_ficheiro",
-            "description": "Lê o conteúdo de um ficheiro de texto do disco.",
+            "description": "Reads the content of a text file from disk.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "caminho": {
                         "type": "string",
-                        "description": "Caminho absoluto do ficheiro a ler",
+                        "description": "Absolute path of the file to read",
                     },
                 },
                 "required": ["caminho"],
@@ -161,13 +171,13 @@ TOOL_DEFS = [
         "type": "function",
         "function": {
             "name": "listar_ficheiros",
-            "description": "Lista os ficheiros e subpastas de uma pasta (não recursivo).",
+            "description": "Lists the files and subfolders of a folder (non-recursive).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "caminho": {
                         "type": "string",
-                        "description": "Caminho absoluto da pasta a listar",
+                        "description": "Absolute path of the folder to list",
                     },
                 },
                 "required": ["caminho"],
@@ -179,20 +189,20 @@ TOOL_DEFS = [
         "function": {
             "name": "procurar_texto",
             "description": (
-                "Procura um termo de texto exacto num ficheiro ou, "
-                "recursivamente, em todos os ficheiros de uma pasta. "
-                "Devolve as linhas onde o termo aparece."
+                "Searches for an exact text term in a file or, "
+                "recursively, across all files in a folder. Returns "
+                "the lines where the term appears."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "caminho": {
                         "type": "string",
-                        "description": "Caminho absoluto do ficheiro ou pasta onde procurar",
+                        "description": "Absolute path of the file or folder to search",
                     },
                     "termo": {
                         "type": "string",
-                        "description": "Termo de texto exacto a procurar",
+                        "description": "Exact text term to search for",
                     },
                 },
                 "required": ["caminho", "termo"],

@@ -8,12 +8,38 @@ forma clara em vez de usar outra coisa.
 """
 import os
 
+import dotenv
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Carrega db/.env para o ambiente — é o ÚNICO sítio onde a password da
+# BD existe, nunca escrita aqui no código. CORRIGIDO 9 Ago 2026: antes
+# a password estava directamente numa string neste ficheiro, que já
+# tinha sido commitado 2x para um repositório PÚBLICO no GitHub — por
+# sorte, essa versão em concreto ainda não tinha sido enviada. Ver
+# HISTORICO.md.
+dotenv.load_dotenv(os.path.join(BASE_DIR, "db", ".env"))
 
 # --- Ligação ao Ollama --------------------------------------------------
 # Porta 11435, não a 11434 por defeito — confirmado em
 # /etc/systemd/system/ollama.service.d/override.conf (OLLAMA_HOST).
 OLLAMA_HOST = "http://127.0.0.1:11435"
+
+# --- Ligação à base de dados de memória (pgvector, 9 Ago 2026) ---------
+# Container isolado próprio (db/docker-compose.yml), porta 5443 — ver
+# portas_reservadas_sistema na memória do utilizador. Falha de forma
+# clara (KeyError) se db/.env não existir ou estiver incompleto, em
+# vez de usar um valor por omissão silencioso — mesmo princípio do
+# resto deste ficheiro.
+_DB_USER = os.environ["POSTGRES_USER"]
+_DB_PASSWORD = os.environ["POSTGRES_PASSWORD"]
+_DB_NAME = os.environ["POSTGRES_DB"]
+DB_DSN = f"host=127.0.0.1 port=5443 dbname={_DB_NAME} user={_DB_USER} password={_DB_PASSWORD}"
+
+# Tenant por defeito para uso pessoal/desenvolvimento (não um cliente
+# real) — todo o uso normal do agente cai aqui a não ser que uma
+# sessão especifique outro tenant_id explicitamente.
+TENANT_PADRAO = "default"
 
 # AVISO — trocar este modelo NÃO é uma troca de uma linha.
 # O tools.py/agent.py foram testados e afinados especificamente para
@@ -107,11 +133,20 @@ LOG_FILE = os.path.join(BASE_DIR, "logs", "chamadas.jsonl")
 # --- Núcleo mínimo (Grupo A — sempre presente em todos os pedidos) ------
 # Curto de propósito. Tudo o resto (memória, skills, conhecimento) é
 # recuperado por pedido, nunca carregado por defeito.
+#
+# EM INGLÊS DE PROPÓSITO (9 Ago 2026) — vai em TODOS os pedidos, é o
+# sítio de maior alavancagem para poupar tokens: a instrução em si não
+# precisa de estar em português para produzir português, só o
+# resultado é que tem de ficar (testado abaixo, `THINK`-style). A
+# conversa com o utilizador continua sempre em português — é uma
+# instrução explícita aqui ("respond in European Portuguese"), não
+# depende do resto do texto estar em PT.
 CORE_IDENTITY = (
-    "És o SUPERDEV, um agente especialista em programação. "
-    "Respostas curtas e directas, em português. "
-    "Usas apenas o que está no teu contexto — nunca inventas memória "
-    "ou factos que não te foram dados."
+    "You are SUPERDEV, an expert programming agent. "
+    "Always respond in European Portuguese (Portugal, not Brazil) — "
+    "short, direct answers. "
+    "Use only what is in your context — never invent memories or "
+    "facts you were not given."
 )
 
 # --- Memória (RAG mínimo) ------------------------------------------------
@@ -161,3 +196,15 @@ MEMORIA_CURTO_PRAZO_TROCAS = 4
 # valha a pena — preferimos não gravar a gravar lixo, mesmo princípio
 # do MEMORY_MIN_SCORE acima. Valor de arranque, por afinar com uso real.
 MEMORIA_DESTILAR_A_CADA_TROCAS = 6
+
+# --- Memória via pgvector (motor "produto", multi-tenant, 9 Ago 2026) ---
+# Threshold PRÓPRIO, não o MEMORY_MIN_SCORE acima — a escala do score
+# combinado aqui é diferente (o ts_rank nativo do Postgres não é 0-1
+# como a sobreposição de palavras calculada à mão no memory.py
+# original). Calibrado com dados reais (ver HISTORICO.md): perguntas
+# claramente irrelevantes (ex: "como se faz uma omolete?") pontuaram
+# 0.40-0.43; factos realmente relevantes pontuaram 0.47-0.60. 0.45
+# fica na margem entre os dois grupos. Valor de arranque, mesma
+# filosofia do MEMORY_MIN_SCORE (preferir não trazer nada a trazer
+# ruído) — por afinar com mais casos reais.
+PG_MEMORY_MIN_SCORE = 0.45
