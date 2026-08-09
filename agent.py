@@ -20,6 +20,7 @@ motor de referência, mas já não são o que o agente usa ao vivo.
 """
 import json
 import os
+import sys
 import time
 import urllib.request
 
@@ -251,17 +252,28 @@ def responder(pedido: str, sessao: dict = None) -> str:
 
 
 def main():
+    """Modo interactivo. Rótulos + cor + separador entre trocas (9 Ago
+    2026) — antes era só `input("> ")` seguido da resposta sem nada a
+    dizer quem escreveu o quê, confuso numa conversa mais longa. Cor
+    só se o terminal a suportar (`isatty`) — nunca em ficheiro/pipe,
+    para não sujar logs com códigos de escape."""
+    cor = sys.stdout.isatty()
+    TU = "\033[33mTu\033[0m" if cor else "Tu"
+    AGENTE = "\033[36mSUPERDEV\033[0m" if cor else "SUPERDEV"
+    SEPARADOR = "─" * 60
+
     print("SUPERDEV — escreve o teu pedido (Ctrl+C para sair)\n")
     sessao = nova_sessao()
     while True:
         try:
-            pedido = input("> ").strip()
+            pedido = input(f"{TU}: ").strip()
         except (KeyboardInterrupt, EOFError):
             print()
             break
         if not pedido:
             continue
-        print(f"\n{responder(pedido, sessao)}\n")
+        resposta = responder(pedido, sessao)
+        print(f"\n{AGENTE}: {resposta}\n\n{SEPARADOR}\n")
 
 
 if __name__ == "__main__":

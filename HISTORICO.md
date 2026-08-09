@@ -705,3 +705,164 @@ dos 2 commits já públicos (mais invasivo, muda hashes de commit) — não
 feito sem essa decisão explícita. Alterações de hoje ficaram só
 preparadas (`git add`), não commitadas nem enviadas — por pedido
 explícito de nunca commitar/enviar sem confirmação.
+
+## Fecho da questão de segurança: commit feito, histórico não reescrito (9 Ago 2026)
+
+Sessão caiu (saída acidental) antes deste ficheiro ser actualizado com
+o desfecho, mas a decisão pendente acima foi tomada e executada:
+commit `78c49a6` ("Segurança: password da BD deixa de estar no código;
+pgvector ligado ao agente") enviado para `origin/main`. Confirmado
+outra vez, já não só planeado: `git show 78c49a6 -- config.py` não tem
+password nenhuma, usa `dotenv.load_dotenv`; `db/.env` não está a ser
+seguido pelo git (`git ls-files | grep env` vazio).
+
+Sobre reescrever o histórico para tirar `memory/_index.json` e
+`logs/chamadas.jsonl` dos 2 commits antigos: reinspeccionado o
+conteúdo ao pormenor antes de decidir — chaves do `_index.json` são só
+5 nomes de ficheiro (`gpu_vram.md`, `daaznexus_bug_navegar.md`,
+`preferencia_utilizador.md`, `daazleads_bd.md`,
+`bug_assist_porta.md`) + vectores de embedding; `chamadas.jsonl` só
+métricas (tamanhos, tempos, tokens), nunca texto de conversas.
+**Decisão do utilizador: não reescrever o histórico.** Sem fuga real
+de password/PII, o custo de um `force-push` num repositório público
+(quebra qualquer clone/fork existente, operação difícil de desfazer)
+não compensa o ganho. Questão de segurança fechada.
+
+## `correr_ruff`: 1ª verificação por execução real, não auto-crítica (9 Ago 2026)
+
+Depois da fundação (memória, ferramentas de leitura, velocidade), 1ª
+tentativa directa de atacar o objectivo de fundo do projecto — o 9B
+"parecer" um 35B na qualidade da resposta em si, não só na infra à
+volta. Duas opções discutidas: **auto-crítica** (o modelo gera,
+depois critica-se a ele mesmo com um 2º pedido) vs. **verificação por
+execução real** (correr um linter/teste de verdade). Escolhida a
+segunda, por pedido explícito do utilizador com uma restrição clara:
+não pode custar mais velocidade nem tokens do que já custa hoje.
+Auto-crítica dobra sempre o custo — é uma 2ª chamada completa ao
+modelo, mesmo quando a 1ª resposta já estava certa. Verificação por
+execução é **condicional**: correr o `ruff` é um subprocesso
+(milissegundos, ~0 tokens), não uma chamada ao modelo, e só acontece
+se o próprio modelo decidir chamar a ferramenta. Mesmo princípio já
+validado com o grounding de memória neste projecto — deixar o modelo
+"adivinhar" se está certo tem o mesmo ponto cego de o deixar inventar
+factos; um erro real do compilador/linter é informação nova, não um
+2º palpite do mesmo modelo.
+
+**Desenho.** `ruff` instalado no sistema (`pip install
+--break-system-packages ruff`, não havia `requirements.txt`/venv no
+projecto — seguido o mesmo padrão do resto). 4ª ferramenta do agente
+(`ler_ficheiro`, `listar_ficheiros`, `procurar_texto`, agora
+`correr_ruff`) e a **1ª que executa algo**, não só lê. Como o SUPERDEV
+ainda não tem ferramenta para escrever ficheiros, `correr_ruff`
+recebe o código como texto (`codigo: str`), grava-o num ficheiro
+temporário descartável (`tempfile.NamedTemporaryFile`) só para a
+duração da verificação, apaga-o logo a seguir (`finally`, mesmo em
+caso de timeout/erro) — nunca toca em ficheiros reais do projecto.
+Timeout de 5s (`RUFF_TIMEOUT_S`) contra o subprocesso ficar preso.
+
+**BUG REAL apanhado a testar ao vivo (não só lido):** a condição
+inicial para "está tudo bem" era `returncode == 0 and not saida` — mas
+o `ruff` imprime `"All checks passed!"` no stdout mesmo quando está
+tudo bem, por isso `saida` nunca ficava vazia e a condição falhava
+sempre, devolvendo o texto cru do ruff em vez do `[OK]` uniforme.
+Corrigido para confiar só no `returncode`.
+
+**Testado ponta-a-ponta pelo `agent.responder()` real, não só a
+função isolada:**
+- Pedido a pedir verificação explícita ("verifica o código que
+  escreveste antes de responder") → modelo chamou `correr_ruff`
+  sozinho via `tool_calls`, recebeu o resultado (`[OK] ruff não
+  encontrou problemas.`), deu resposta final. Confirmado no log:
+  `pediu_ferramenta=True` seguido de `False` na volta seguinte.
+- Pedido de código normal, sem pedir verificação nenhuma ("Escreve uma
+  função Python que inverte uma string.") → só 1 chamada ao modelo,
+  `pediu_ferramenta=False` — **não chamou a ferramenta por iniciativa
+  própria**, confirma que não é eager e não aumenta o custo quando não
+  faz sentido.
+
+**Aviso, para não sobrevender o resultado:** só 2 casos testados, os
+dois com código trivial. Não é prova de que o modelo nunca vai chamar
+`correr_ruff` por iniciativa própria em código mais complexo/propenso
+a erro, nem de que o padrão "só chama quando faz sentido" aguenta a
+tarefas difíceis — é o comportamento observado até agora, por
+confirmar com mais casos.
+
+Commitado e enviado: `5bcf11b`, em `origin/main`.
+
+## Terminal com rótulos + `server.py`: interface de chat sem alterar o agente (9 Ago 2026)
+
+Duas peças pedidas pelo utilizador para conseguir testar o SUPERDEV à
+vontade, para lá dos testes feitos até aqui.
+
+**1. `agent.py` `main()` — rótulos + cor + separador entre trocas.**
+O modo interactivo (`python3 agent.py`) antes só tinha `input("> ")`
+seguido da resposta sem nada a indicar quem escreveu o quê — confuso
+numa conversa mais longa. Adicionado `Tu:`/`SUPERDEV:` (cor ANSI só se
+`sys.stdout.isatty()`, nunca em ficheiro/pipe) e uma linha divisória
+(`─` × 60) entre trocas. Testado com uma conversa real de 2 perguntas
+via stdin: os rótulos e a separação ficaram correctos. **Achado à
+parte, não é bug da formatação**: as 2 perguntas eram diferentes
+(confirmado no log — 16 e 27 caracteres), mas o modelo deu a resposta
+*exactamente igual* às duas, ignorando o pedido explícito "sem código"
+na 2ª. Fica registado como observação sobre a qualidade de resposta a
+seguimentos subtis — não investigado a fundo, N=1.
+
+**2. `server.py` — servidor novo, API compatível com a OpenAI, para
+ligar interfaces de chat prontas (Open WebUI) ao SUPERDEV.** Motivado
+por o utilizador achar o terminal difícil de usar para conversar a
+sério. Decisão importante, confirmada explicitamente com o utilizador
+antes de avançar: **ficheiro à parte, não altera `agent.py`/
+`tools.py`/`config.py`/`pgmemory.py`** — só importa `agent` e chama
+`agent.responder()`, exactamente como `agent.main()` já fazia.
+
+Desenho:
+- `GET /v1/models` e `POST /v1/chat/completions`, os 2 endpoints que o
+  Open WebUI precisa para listar e falar com um modelo custom.
+- **Sessão única e persistente** (`SESSAO = agent.nova_sessao()`, ao
+  nível do módulo) em vez de seguir o histórico que o cliente reenvia
+  a cada pedido (a API da OpenAI é "sem estado" por definição — o
+  SUPERDEV já tem a sua própria gestão de memória, duas fontes de
+  verdade a competir seria pior). Só a última mensagem do utilizador é
+  usada como pedido. Consequência assumida: uma "New Chat" no Open
+  WebUI reinicia o que aparece no ecrã, mas a memória de longo prazo
+  do SUPERDEV (pgvector) continua a acumular por baixo — é uma
+  ferramenta pessoal de um utilizador só, não multi-utilizador, não
+  vale a pena mais complexidade que isto agora.
+- `usage` (tokens) no formato de resposta calculado a partir do
+  próprio `logs/chamadas.jsonl` — regista o tamanho do ficheiro antes
+  de chamar `agent.responder()`, lê só o que foi escrito depois, soma
+  `prompt_eval_count`/`eval_count` de todas as linhas novas (cobre
+  também pedidos com voltas de ferramentas, que geram mais que uma
+  linha de log para uma só resposta ao utilizador).
+- Suporta `stream: true/false`, mas não é streaming real: o
+  `agent.py` já chama a Ollama com `stream=False` internamente
+  (decisão anterior, testada). Quando o cliente pede `stream=true`,
+  devolve a resposta inteira num único "pedaço" SSE, no formato
+  correcto — evita bloquear/dar erro no Open WebUI, mas não aparece
+  palavra a palavra.
+- Porta `8850` (nova reserva, ver `portas_reservadas_sistema` na
+  memória do utilizador) — confirmada livre com `ss -tlnp` antes de
+  escolher.
+
+**Testado ao vivo, ponta a ponta, antes de entregar:**
+- `GET /v1/models` devolve o modelo `superdev`.
+- `POST /v1/chat/completions` com `stream:false` — resposta completa,
+  formato OpenAI correcto, `usage` com números reais (794 entrada +
+  216 saída, coerente com o que o `ver_logs.py` também mostrou).
+- `stream:true` — confirmado o formato SSE certo (`data: {...}` por
+  pedaço, termina em `data: [DONE]`).
+- `docker exec open-webui curl http://host.docker.internal:8850/v1/models`
+  — confirma que o container do Open WebUI alcança mesmo o servidor
+  (não só localhost do host).
+- `python3 ver_logs.py 3` depois dos testes acima — confirmou que os 3
+  pedidos feitos através do `server.py` apareceram no log, sem
+  qualquer alteração ao `ver_logs.py` nem ao `agent.py`: reaproveita a
+  mesma escrita de log que já existia, por usar a mesma
+  `agent.responder()` por baixo.
+
+**Por decidir/testar a seguir:** login real no Open WebUI a falar com
+o modelo "superdev" (só testado por `curl`/`docker exec` até agora,
+não pela interface a sério); se ficar bem, considerar systemd
+`--user` para o `server.py` sobreviver a reinícios, como o resto do
+ecossistema — não feito ainda, prematuro antes de validação com uso
+real.
