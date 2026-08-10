@@ -981,3 +981,50 @@ Resultado: **3 voltas em vez de 7**, o modelo usou
 chamada (confirmado no log, nome+argumentos completos), respondeu com
 sucesso — e a resposta já listava primeiro o que estava implementado
 antes de sugerir melhorias (o que faltava na tentativa anterior).
+
+## `server.py` não sobrevivia a reinícios do PC (10 Ago 2026)
+
+Incidente real: `localhost:3000` (Open WebUI) deixou de mostrar o
+modelo `superdev`, que ontem tinha ficado a funcionar. Causa raiz,
+confirmada por `ss -tlnp` + `ps aux`: o PC reiniciou hoje às 15:28 (os
+outros serviços do ecossistema sovereign, todos `systemd --user`,
+arrancaram sozinhos nessa hora); o `server.py` tinha sido corrido à
+mão num terminal ontem (ver secção anterior), não era serviço — o
+reinício matou o processo e nada o voltou a ligar. A ligação continuava
+configurada no Open WebUI (`http://host.docker.internal:8850/v1`),
+só inalcançável.
+
+**Segunda causa, só apareceu depois de religar o `server.py` à mão e
+confirmar por `curl`/`docker exec` que respondia:** o modelo continuava
+a não aparecer na lista do Open WebUI. Admin → Settings → Connections
+tem um toggle **"Cache Base Model List"** ligado — só vai buscar a
+lista de modelos ao arrancar o container ou quando as definições da
+ligação são gravadas, nunca sozinho entretanto. Como a ligação esteve
+morta o dia todo, a cache ficou presa numa foto sem o `superdev`.
+Corrigido clicando "Save" nessa página (força o refetch) — nada a
+mudar no lado do SUPERDEV. Fica registado para o futuro: se o modelo
+desaparecer outra vez sem razão óbvia, primeiro confirmar se o
+`server.py` está mesmo a responder (`curl localhost:8850/v1/models`)
+antes de mexer em connections; se estiver a responder e mesmo assim não
+aparecer, é este cache.
+
+**Correcção definitiva, testada não só configurada:** criado
+`systemd/superdev-server.service` (`systemd --user`, mesmo padrão do
+resto do ecossistema sovereign — `Restart=always`, `WorkingDirectory`
+no repo, log para o `journal`). `ExecStartPre` mata o que estiver preso
+à porta 8850 antes de arrancar (evita falha por porta ocupada num
+restart). Corre com `/usr/bin/python3` (não o `venv` do
+`agent-sovereign` — esse não tem `psycopg2`/`fastapi`/`uvicorn`
+instalados, confirmado a testar). Instalado com
+`systemctl --user enable --now`; `loginctl show-user` já tinha
+`Linger=yes`, por isso arranca mesmo sem sessão gráfica aberta.
+**Testado com um `systemctl --user restart` a sério** (não só o
+arranque inicial) — voltou a responder em segundos, confirmado outra
+vez ponta a ponta com `curl` directo e `docker exec open-webui curl
+http://host.docker.internal:8850/v1/models`.
+
+Nota para manutenção futura: o serviço só carrega `config.py`/
+`agent.py`/etc. uma vez, ao arrancar (mesma decisão de desenho já
+documentada acima para o modo terminal) — qualquer alteração a esses
+ficheiros ou ao `db/.env` só entra em vigor depois de
+`systemctl --user restart superdev-server`.
