@@ -1028,3 +1028,421 @@ Nota para manutenção futura: o serviço só carrega `config.py`/
 documentada acima para o modo terminal) — qualquer alteração a esses
 ficheiros ou ao `db/.env` só entra em vigor depois de
 `systemctl --user restart superdev-server`.
+
+## Repetição/corte silencioso + Open WebUI a injectar pedidos escondidos (10 Ago 2026)
+
+Utilizador a testar o agente a sério pela primeira vez via Open WebUI,
+queixa real: "demora a responder e responde com mentiras". Investigado
+com os logs reais (`logs/chamadas.jsonl` + `logs/conversas.jsonl`),
+não por suposição — duas causas distintas, confirmadas.
+
+**1. Ciclo de repetição + corte silencioso.** Pedidos tipo "o que
+farias diferente" (lista longa, item a item) faziam o modelo repetir
+blocos inteiros já escritos (não só palavras soltas — parágrafos
+completos idênticos, ex.: pontos 7–17 de uma resposta eram os pontos
+7–17 reciclados) até bater no tecto de `num_predict=2048` e cortar a
+meio de uma palavra, sem qualquer aviso. 65–90s gastos a gerar ~2000
+tokens, mais de metade lixo repetido.
+
+- **Correcção 1:** `repeat_penalty` subido de 1.1 (redundante, era só
+  o default herdado) para 1.3 em `config.OPTIONS` — o
+  `presence_penalty=1.5` herdado do Modelfile do Qwen (não mexido,
+  ver nota ao lado) penaliza tokens já vistos, mas não travava blocos
+  estruturados inteiros a repetirem-se.
+- **Correcção 2:** `ollama_chat()` passou a devolver também
+  `done_reason` (a Ollama já o manda, estava a ser ignorado). Quando é
+  `"length"` (cortado à força, não terminou sozinho),
+  `responder()` acrescenta um aviso explícito ao fim da resposta —
+  `"[SUPERDEV: resposta cortada — atingi o limite de N tokens...]"` —
+  em vez de cortar em silêncio.
+- **Testado ao vivo, ponta a ponta:** repetido via `curl` o mesmo tipo
+  de pedido que antes entrava em ciclo (pedir a lista de constantes de
+  `tools.py`) — resposta limpa, sem repetição, `done_reason: "stop"`,
+  25.9s (antes 65-90s). Corte forçado de propósito baixando
+  `num_predict` para 30 temporariamente — aviso apareceu correctamente
+  ("...atingi o limite de 30 tokens...") — valor reposto a 2048 a
+  seguir e serviço reiniciado.
+
+**2. Open WebUI a injectar pedidos que o utilizador nunca fez.**
+Confirmado comparando o que aparecia no ecrã (mensagem curta e limpa)
+com o que chegava ao servidor (`pedido` em `conversas.jsonl` — o texto
+literal recebido, antes de qualquer coisa do SUPERDEV lhe tocar): de
+vez em quando chegava um bloco `"History:\nUSER: \"\"\"...\"\"\"\n
+ASSISTANT: \"\"\"...\"\"\"\nQuery: ..."` com a conversa inteira colada
+lá dentro, cada vez maior (chegou a 28.907 caracteres numa só
+mensagem). Causa: `Admin → Settings → Models → superdev` tinha **todas**
+as capacidades do template por defeito ligadas (`Vision`,
+`Web Search`, `Citations`, `Builtin Tools` — e dentro deste,
+`Memory`/`Chat History`/etc.). Com isso ligado, o Open WebUI dispara
+os seus próprios passos de bastidores (condensar o histórico numa
+query "independente" para citações/pesquisa) — como não há um modelo
+auxiliar leve configurado para essas tarefas, usa o próprio `superdev`,
+gastando um ciclo completo do agente (RAG + ferramentas) numa tarefa
+que devia ser trivial. Provavelmente parte da causa da lentidão E da
+confusão nas respostas (o modelo recebia, de vez em quando, um pedido
+fora de carácter que não sabia bem tratar).
+
+**Corrigido, não no código — configuração do Open WebUI:** desligadas
+todas as capacidades desnecessárias do modelo `superdev` (nenhuma
+delas é usada — o SUPERDEV gere a sua própria memória/ferramentas do
+lado do servidor). Fica só chat de texto simples.
+
+**Terceiro achado, sem correcção de código — só clareza:** o terminal
+(`python3 agent.py`) já é o caminho de teste "limpo" — chama
+`responder()` directamente, sem HTTP, sem Open WebUI, sem nenhum dos
+pedidos escondidos acima. Já existia (rótulos+cor de 9 Ago), só faltava
+mostrar o tempo de cada resposta inline para servir bem de bancada de
+testes sem ir aos logs — adicionado (`SUPERDEV (6.2s): ...`), testado
+ao vivo via stdin.
+
+## Acesso à web + terminal "bonito" + comando `superdev` (10 Ago 2026)
+
+Dois pedidos do utilizador na mesma sessão, ambos motivados por testar
+o agente a sério: (1) queria o agente com acesso à internet, "para os
+testes"; (2) o terminal bruto (`python3 agent.py`) é difícil de ler
+numa conversa mais longa — sem destaque de markdown, sem separação
+visual clara.
+
+**1. Ferramenta 6, `pesquisar_web`** (`tools.py`). Usa o SearXNG que já
+corria localmente no Docker (container `searxng`, porta 8888, outro
+projecto) — confirmado ao vivo com `curl` que `/search?format=json`
+já responde sem nenhuma chave de API nem configuração extra no
+container. Sem depender de serviço pago nenhum (Google/Bing/Brave),
+sem nada sair desta máquina directamente (é o SearXNG que fala com os
+motores de busca reais). `config.SEARXNG_HOST` novo, mesmo padrão do
+`OLLAMA_HOST`. Devolve título+resumo+URL dos primeiros 5 resultados
+(`LIMITE_RESULTADOS_WEB`) — mesma filosofia de tectos claros das
+outras ferramentas. **Testado ao vivo:** pergunta real sobre a versão
+mais recente do Claude Code — confirmado em `logs/chamadas.jsonl` que
+`pesquisar_web` foi mesmo chamada, com a query certa, resposta grounded
+nos resultados reais, ~14s ponta-a-ponta.
+
+**2. `chat.py`, novo** — terminal de conversa com `rich` (já estava
+instalado no `/usr/bin/python3`, confirmado antes de usar). Ficheiro à
+parte de propósito, mesmo espírito do `server.py`: não mexe em
+`agent.py`/`tools.py`/`config.py`/`pgmemory.py`, só importa `agent` e
+usa `responder()`/`nova_sessao()` como o modo terminal bruto já fazia
+— a lógica não muda, só a apresentação. Painéis com borda para cada
+troca, markdown das respostas renderizado a sério (títulos, negrito,
+blocos de código — antes vinha tudo em texto cru com `**`/`###`
+literais), spinner "a pensar..." enquanto o modelo gera, tempo por
+resposta no título do painel. O modo bruto (`agent.py` `main()`)
+continua a existir sem `rich` como dependência — este é uma camada
+opcional por cima, não substitui.
+
+**3. Comando `superdev`** — script em `~/.local/bin/superdev` (já no
+PATH), corre `chat.py` com o `/usr/bin/python3` certo (o que tem
+`rich`/`fastapi`/`psycopg2`/etc.). Não precisa `cd` para a pasta do
+projecto — Python resolve `import agent` pelo caminho do próprio
+`chat.py`, não pelo directório onde o comando foi chamado.
+
+**Testado ao vivo, ponta-a-ponta:** `superdev` chamado a partir de
+`/tmp` (fora da pasta do projecto), pergunta real por `stdin` — painéis
+renderizados correctamente, resposta grounded, tempo mostrado (7.9s).
+
+## `num_predict` fixo removido (10 Ago 2026)
+
+Utilizador viu a resposta 17 cortada a meio numa lista longa (incidente
+já corrigido acima) e perguntou se era o `num_ctx` a limitar — não era
+(ver explicação dada: `num_ctx` é a janela toda, `num_predict` era um
+2º tecto artificial mais baixo, colado por cima). Uma vez explicado,
+posição clara do utilizador: não gosta de ter um tecto artificial
+separado do limite real — "não faz sentido ter isto".
+
+**Corrigido:** `num_predict` passou de `2048` fixo para `-1` (sem tecto
+artificial — só limitado pelo `num_ctx`=16384, que é o limite real).
+Fazia sentido agora que já não é este tecto a "resolver" o ciclo de
+repetição (isso já está corrigido pelo `repeat_penalty`, ver acima) —
+só estava a cortar respostas legítimas que precisassem de ser longas.
+A mensagem de aviso de corte em `agent.py` deixou de citar um número
+de tokens fixo (já não existe um) — passou a falar em "encher a janela
+de contexto", que é a única forma de isto voltar a acontecer agora.
+
+**Testado ao vivo:** pedido deliberadamente exaustivo (listar cada
+função E cada constante de `tools.py`, com o que faz, falha e
+melhoraria) — resposta de **2293 tokens** (mais do que o antigo tecto
+de 2048), terminou sozinha com `done_reason: "stop"` e uma conclusão
+real no fim ("RESUMO GERAL"), sem repetição nenhuma. Confirma os dois
+lados da correcção: sem tecto artificial a cortar respostas legítimas,
+e sem o ciclo de repetição a voltar (esse continua resolvido pelo
+`repeat_penalty`).
+
+Achado à parte, não relacionado com isto: o mesmo pedido tornado ainda
+mais exaustivo (pedir explicação de TODAS as funções, não só as
+constantes) fez o modelo voltar a chamar `ler_ficheiro`/`procurar_texto`
+repetidamente sem nunca escrever a resposta final, batendo no
+`MAX_VOLTAS_FERRAMENTAS=5` já existente. Bug diferente (o modelo a
+re-verificar informação que já tinha, não a gerar texto a mais) — fica
+registado, não investigado agora.
+
+## Plano anti-confabulação (10 Ago 2026)
+
+Incidente real, apanhado pelo utilizador a testar no `chat.py` novo:
+pediu "o que mudavas para reduzir tokens/velocidade" e o SUPERDEV,
+depois de ler `config.py` por inteiro (`ler_varios_ficheiros`,
+confirmado no log), respondeu "k e MEMORY_TOP_K não estão explícitos
+(provavelmente 5 ou 10)" e "MEMORIA_CURTO_PRAZO_TROCAS não está
+explícito (provavelmente 10 ou 20)" — ambos falsos e ambos **já lidos
+na mesma troca** (`MEMORY_TOP_K=3`, `MEMORIA_CURTO_PRAZO_TROCAS=4`).
+A mesma resposta também sugeria baixar `num_ctx` para 4096-8192 sem
+mencionar que foi exactamente esse valor que causou o bug real de 9
+Ago (corte silencioso de contexto), e sugeria repor `num_predict` a
+512-1024 — desfazendo, sem saber, a decisão tomada há minutos na
+mesma sessão de trabalho (o modelo não tem memória entre sessões
+diferentes do utilizador com o Claude).
+
+Pergunta do utilizador, importante: isto é normal em LLMs pequenos?
+Existe solução, sabendo que o modelo por baixo vai mudar no futuro
+(9B hoje, 14B/35B depois)? Resposta acordada: sim, é confabulação, um
+problema conhecido de todos os LLMs (mais frequente nos pequenos, não
+exclusivo deles) — sem cura completa, mas com mitigações reais que
+**não dependem do modelo por baixo**, por isso continuam a valer a
+pena depois de trocar de modelo. Dois níveis implementados agora
+(havia mais dois nível discutidos e postos de lado por custarem
+tempo/tokens — ver conversa):
+
+**Nível 0 — regra específica no `CORE_IDENTITY`** (`config.py`). A
+regra genérica que já existia ("never invent facts") não chegou —
+falhou nas duas vezes vistas hoje. Substituída/reforçada por uma regra
+estreita e concreta sobre números especificamente: só afirmar um valor
+de configuração se conseguir apontar o texto exacto onde o viu nesta
+troca; caso contrário, dizer que não sabe. Modelos pequenos respondem
+melhor a regras estreitas do que a princípios largos — mesmo
+princípio já usado no `CORE_IDENTITY` para o `BASE_DIR` (9 Ago).
+
+**Nível 1 — verificação mecânica em `agent.py`** (`_verificar_grounding`,
+`_constantes_citadas`, `_alegacoes_falsas_de_incerteza`). Custo ~0
+(nenhuma chamada extra ao modelo, só regex/string matching sobre a
+resposta final e o texto que as ferramentas devolveram nessa troca).
+Desenhada de propósito para ser genérica — não olha para nada
+específico do qwen3.5, só texto simples — a pedido explícito do
+utilizador: "o conceito é que este LLM está a ser testado para depois
+implementar o conceito em outros LLMs". Dois padrões:
+1. `NOME_MAIUSCULO = valor` citado na resposta que contradiz o valor
+   real lido nessa troca.
+2. Frase com expressão de dúvida ("não está explícito", "provavelmente",
+   etc.) a mencionar uma constante que na verdade tinha um valor
+   concreto no texto lido — o padrão que apanhou o incidente de hoje
+   (o padrão 1 sozinho, testado, NÃO apanhava este caso: o modelo
+   nunca escreveu "MEMORY_TOP_K = 5" como afirmação directa, só
+   hedged em prosa).
+
+Não corrige a resposta sozinha (podia estar a inventar a correcção
+também) — só acrescenta um aviso visível no fim, para o utilizador
+decidir.
+
+**Testado, não só lido:**
+- 3 testes unitários isolados (sem chamar o modelo): caso de
+  contradição directa → apanhado; caso real de hoje (dúvida falsa) →
+  apanhado; resposta limpa e correcta → nenhum aviso (sem falso
+  positivo).
+- 2 testes ao vivo, ponta-a-ponta, com o servidor real: pergunta directa
+  sobre `MEMORY_TOP_K`/`MEMORIA_CURTO_PRAZO_TROCAS` → respondeu correcto
+  à primeira, sem aviso nenhum; pergunta mais parecida com o incidente
+  original (pedir para ler e opinar sobre os mesmos 3 valores) →
+  respondeu tudo correcto (`MEMORY_TOP_K=3`, `MEMORIA_CURTO_PRAZO_
+  TROCAS=4`, `num_ctx=16384`) e ainda mencionou sozinho o aviso do bug
+  de 9 Ago ao sugerir baixar `num_ctx` — melhoria visível já com só o
+  Nível 0, confirmado no log que leu mesmo os ficheiros (`ler_varios_
+  ficheiros` + `procurar_texto`) antes de responder.
+
+**Limite honesto, para não vender isto como mais do que é:** só apanha
+confabulação sobre constantes `NOME_MAIUSCULO`. Não apanha invenções
+em prosa livre (percentagens fabricadas tipo "+30% velocidade",
+afirmações erradas sobre comportamento de código) — isso ficaria para
+um Nível 2 (uma 2ª verificação, mais cara, só para pedidos de risco),
+posto de lado por agora a pedido do utilizador (prioridade em
+velocidade/tokens).
+
+## Nível 1 ampliado — 2 lacunas reais apanhadas pelo próprio utilizador a testar (10 Ago 2026)
+
+O utilizador continuou a testar (`chat.py`, sessão própria) e trouxe
+uma resposta nova para eu avaliar: pediu para ler ficheiros do projecto
+e sugerir mudanças em `config.py` para reduzir tokens/velocidade. A
+resposta citava `temperature=0.2`, `top_p=0.95`, `top_k=20`,
+`repeat_penalty=1.3`, `num_ctx=16384`, `num_predict=-1` — **todos
+correctos** — numa tabela markdown, e ainda sugeria mudanças (algumas
+repetindo problemas já criticados: baixar `num_ctx` sem mencionar o
+bug de 9 Ago, repor `num_predict` fixo desfazendo a decisão de horas
+antes, subir `temperature` sem relação com o pedido, percentagens
+"+30-50%" inventadas outra vez).
+
+**Achado mais importante que a crítica ao conteúdo:** ao investigar
+porque o Nível 1 (feito horas antes, na mesma sessão de trabalho) não
+tinha disparado nada, confirmei nos logs que esta troca só chamou
+`procurar_texto(config.py, "LOG_FILE")` — irrelevante para os 6
+valores citados. Não há registo de onde vieram esses 6 valores
+correctos (não desta troca, não da janela de curto prazo — descartada
+entre trocas por desenho —, não da memória de longo prazo — consultada
+a Postgres directamente, os factos lá guardados são de outros
+projectos). Uma resposta certa sem fundamento rastreável é mais
+preocupante do que uma errada: dá confiança falsa para a próxima vez
+que a mesma falta de fundamento calhar de dar um valor errado.
+
+**Duas lacunas reais no Nível 1, confirmadas e corrigidas:**
+
+1. **Formato.** `_PADRAO_CONSTANTE` só reconhecia `NOME_MAIUSCULO =
+   valor` (estilo constante Python). Mas `config.OPTIONS` usa chaves
+   **minúsculas** de dicionário (`"temperature": 0.2,`), e a resposta
+   citou-as numa **tabela markdown** (`| num_ctx | 16384 |`) — nem o
+   nome nem o formato batiam. Confirmado com um teste isolado antes de
+   mexer em código: `_constantes_citadas()` devolvia `{}` para os dois
+   lados (o que foi lido E o que foi dito), mesmo com 6 valores
+   citados com confiança total. Corrigido: dois padrões novos
+   (`_PADRAO_CHAVE_DICT` para `"chave": valor`, `_PADRAO_LINHA_TABELA`
+   para linhas de tabela), nomes normalizados para minúsculas na
+   comparação.
+
+2. **Lógica.** `_verificar_grounding` desistia em silêncio sempre que
+   nada de reconhecível tivesse sido lido nesta troca (`reais` vazio)
+   — errado: nesse caso, qualquer constante citada devia ir
+   directamente para "não confirmada", não passar sem verificação
+   nenhuma. Corrigido: só desiste se não houve NENHUMA chamada de
+   ferramenta nesta troca (não se as chamadas não bateram com nada
+   reconhecido).
+
+3. **Achado extra, ao testar de novo com o servidor real (mesmo dia,
+   pergunta parecida):** o modelo desta vez disse honestamente "`X`
+   (não aparece explícito no código lido)" para 2 constantes que TINHA
+   lido — uma 3ª variante de fraseado de dúvida
+   (`_FRASES_DE_INCERTEZA` já tinha "não está explícito", não tinha
+   "não aparece explícito"). Adicionada.
+
+**Testado, não só corrigido às cegas:** 5 casos isolados (os 3 de
+ontem, para confirmar zero regressão + os 2 novos) e 2 pedidos reais
+ao servidor. Confirmado: o caso que escapou agora fica marcado como
+"não confirmado nesta troca"; os 3 casos de ontem continuam a
+funcionar; uma resposta limpa continua sem aviso nenhum.
+
+**Preço a pagar, revelado por um 5º teste deliberado de falso-positivo:**
+o padrão de tabela markdown é literal demais — uma tabela sem nada a
+ver com config (`| ler_ficheiro | 15 | lê um ficheiro |`, uma contagem
+de linhas de função) também fica marcada como "não confirmada". É um
+aviso fraco (parêntesis, não "⚠️ contradiz"), mas vai aparecer com mais
+frequência do que antes. Decisão: manter, a favor de apanhar mais
+casos reais como o de hoje — mas registado aqui para não ser
+apresentado como "sem custo nenhum".
+
+## Um exemplo bom, para registo — e 2 bugs reais no `chat.py` (10 Ago 2026)
+
+Nem tudo hoje foi confabulação: o utilizador trouxe uma resposta sobre
+`tools.py` que dizia "o código está cortado no meio de uma exceção,
+falta o `except` completo — posso continuar a ler?". Verificado: **é
+verdade**. `tools.py` cresceu para 19125 caracteres com o
+`pesquisar_web` de ontem, ultrapassando o próprio `LIMITE_CARACTERES`
+(8000) que `ler_ficheiro` usa para se proteger — o corte cai mesmo a
+meio do `except Exception:` de `procurar_texto` (confirmado a chamar
+`ler_ficheiro` directamente: `"...[cortado — ficheiro tem 19125
+caracteres, só os primeiros 8000 foram lidos]"`, logo a seguir a
+`except Exception:`). O modelo leu o aviso de corte, disse a verdade
+sobre isso, e pediu para continuar em vez de inventar o resto — exactamente
+o comportamento que o Nível 0 pede. Fica registado como contra-exemplo,
+para não ficar só a lista de incidentes maus.
+
+**Achado à parte, sem gravidade:** `tools.py` a ultrapassar o seu
+próprio `LIMITE_CARACTERES` de leitura é um bocado irónico (o ficheiro
+que define o limite já não cabe dentro dele) — não corrigido agora,
+só anotado; o modelo já reagiu bem (pediu para continuar a ler em vez
+de inventar), por isso não é urgente.
+
+**Dois bugs reais no `chat.py`, apanhados pelo utilizador a usar a
+sério:** (1) `input()` sem `readline` importado (biblioteca padrão,
+só faltava activar) não sabia mover o cursor com as setas nem apagar
+bem texto colado. (2) `Ctrl+C` a meio de escrever uma linha errada
+fechava o programa **inteiro** em vez de só cancelar essa linha —
+incidente real: utilizador colou texto errado, tentou `Ctrl+C` para
+cancelar antes de enviar, perdeu a sessão toda. Corrigidos os dois:
+`import readline` (dá também histórico com setas cima/baixo, de
+borla); `Ctrl+C` a escrever agora só cancela a linha (mensagem
+"linha cancelada — Ctrl+D para sair", o loop continua); `Ctrl+C`
+enquanto o modelo está a gerar deixa de bloquear a espera (não
+cancela o trabalho do lado da Ollama, só liberta o utilizador).
+
+**Testado, não só corrigido:** processo simulado com `SIGINT` a meio
+da escrita — confirmado que o processo continua vivo e volta a pedir
+input, em vez de terminar. Teste real de uma troca completa a seguir,
+para confirmar que nada partiu.
+
+Perguntado se fazia sentido também editar/reenviar uma mensagem já
+enviada (como no Claude Code) — esclarecido com o utilizador que só
+queria a edição dentro da linha actual, já resolvida; a feature maior
+(histórico editável, reenvio) fica de fora, não pedida.
+
+## `ler_ficheiro` não sabia continuar de onde parou (10 Ago 2026)
+
+Continuação directa do achado da secção anterior: o utilizador disse
+"sim" ao "posso continuar a ler?" do SUPERDEV — e a resposta seguinte
+foi **exactamente a mesma avaliação, presa no mesmo sítio**
+("`procurar_texto` incompleto... preciso de ler o resto"). Confirmado
+no log: chamou `ler_ficheiro(tools.py)` outra vez, sem argumentos
+novos. Causa raiz, não é o modelo desta vez — é uma ferramenta a
+faltar: `ler_ficheiro` não tinha nenhuma forma de pedir "o resto", só
+sabia ler sempre desde o byte 0. Pedir para continuar não tinha como
+funcionar, por bem que o modelo tivesse percebido o que faltava.
+
+**Corrigido:** `ler_ficheiro` ganhou um parâmetro opcional `inicio`
+(offset em caracteres, 0 por omissão). A mensagem de corte passou a
+dizer o valor exacto a usar a seguir (`"...chama ler_ficheiro outra
+vez com inicio=8000."`) — a descrição em `TOOL_DEFS` também avisa
+explicitamente que repetir a mesma chamada devolve o mesmo excerto,
+não avança. `ler_varios_ficheiros` (que chama `ler_ficheiro` por
+dentro) não precisou de alterações — o novo parâmetro tem omissão que
+mantém o comportamento antigo.
+
+**Testado, ponta a ponta:** 3 testes isolados (1ª leitura corta e diz
+o `inicio` certo; 2ª leitura com esse `inicio` mostra mesmo o resto,
+incluindo `correr_ruff` que antes nunca aparecia; `ler_varios_
+ficheiros` sem alterações, regressão OK). Depois, ao vivo com o
+servidor real, reproduzindo o pedido exacto do utilizador ("lê
+tools.py e avalia") — desta vez numa única troca: `ler_ficheiro`,
+`ler_ficheiro(inicio=8000)`, `ler_ficheiro(inicio=16000)`, cobrindo o
+ficheiro completo (20934 caracteres) sozinho, sem precisar de um "sim"
+extra do utilizador. Avaliação final correcta e completa — incluindo
+dois achados reais e válidos sobre código escrito hoje: `pesquisar_web`
+podia rebentar se `dados` vier `None` (`dados.get(...)` falharia), e
+reparou sozinho na funcionalidade `inicio` nova ("diz exactamente onde
+continuar"). Um ponto ligeiramente impreciso: disse que
+`ler_varios_ficheiros` "engole" erros de ficheiros individuais — na
+verdade o erro fica visível por ficheiro (`=== caminho ===` seguido do
+texto do erro), não é descartado; interpretação a mais, não invenção
+de algo inexistente.
+
+## Sessão a correr código antigo + parar para pedir licença desnecessariamente (10 Ago 2026)
+
+O utilizador continuou a dizer "sim" ao "posso continuar a ler?" e a
+resposta seguinte era **sempre a mesma, presa no mesmo sítio** — a
+correcção do `inicio` (secção anterior) parecia não ter feito nada.
+Causa: o `chat.py` do utilizador era um processo já a correr desde
+antes da correcção (`ps aux` confirmou: terminal arrancado às 20:19,
+`ler_ficheiro` corrigido às 20:36 — 17 minutos depois) — Python só lê
+o ficheiro uma vez, ao arrancar; reiniciar o `superdev-server`
+(serviço à parte, sem relação com o terminal do utilizador) não afecta
+um `chat.py` já aberto. Ficou registado como lição prática: qualquer
+correcção ao código do agente só chega a uma sessão de terminal já
+aberta se essa sessão for reiniciada (`Ctrl+D`, `superdev` outra vez).
+
+**Pergunta do utilizador, com razão:** mesmo que a correcção
+funcionasse, porque é que tem de aprovar manualmente "sim, continua a
+ler" de cada vez — que vantagem tem isso, é só consumo de tokens à
+toa? Resposta: nenhuma vantagem — é desperdício puro. O modelo já tem
+`MAX_VOLTAS_FERRAMENTAS` de sobra para continuar sozinho a ler (o
+`inicio` novo existe exactamente para isso); parar para perguntar
+gasta uma troca inteira (pergunta do utilizador + resposta) só para
+confirmar o óbvio.
+
+**Corrigido:** nova frase no `CORE_IDENTITY` — tem voltas de
+ferramentas disponíveis, deve continuar sozinho a chamar ferramentas
+(ex.: `ler_ficheiro` outra vez com o `inicio` que a mensagem de corte
+deu) em vez de parar a pedir licença; só deve perguntar ao utilizador
+quando precisar mesmo de uma informação que só ele tem (caminho
+ambíguo, escolha entre alternativas reais), nunca para um passo
+mecânico que já pode dar sozinho.
+
+**Testado ao vivo, ponta a ponta, com o serviço reiniciado a sério
+(não o erro de antes):** mesmo pedido de sempre ("lê tools.py e
+avalia") — desta vez em **1 troca só**, sem nenhum "posso continuar?":
+`ler_ficheiro` → `inicio=8000` → `inicio=16000`, ficheiro completo
+(confirmado: a avaliação final menciona `PESQUISA_WEB_TIMEOUT_S`, a
+constante mais ao fundo do ficheiro, adicionada ontem), 29.8s,
+avaliação completa e coerente, "Veredito: Excelente implementação,
+pronta para uso em produção."

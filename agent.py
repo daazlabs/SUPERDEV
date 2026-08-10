@@ -20,6 +20,7 @@ motor de referência, mas já não são o que o agente usa ao vivo.
 """
 import json
 import os
+import re
 import sys
 import time
 import urllib.request
@@ -40,11 +41,23 @@ def _log(registo: dict, caminho: str | None = None) -> None:
         f.write(json.dumps(registo, ensure_ascii=False) + "\n")
 
 
-def ollama_chat(messages: list, ferramentas: list | None = None, memorias_usadas: list | None = None) -> dict:
-    """Chama a Ollama e devolve a mensagem completa (não só o texto) —
-    pode vir com 'content' (resposta directa) ou 'tool_calls' (pedido
-    de ferramenta), consoante o modelo decidir.
-    """
+def ollama_chat(
+    messages: list, ferramentas: list | None = None, memorias_usadas: list | None = None
+) -> tuple[dict, str | None]:
+    """Chama a Ollama e devolve (mensagem completa, done_reason).
+
+    A mensagem pode vir com 'content' (resposta directa) ou
+    'tool_calls' (pedido de ferramenta), consoante o modelo decidir.
+    done_reason é o que a própria Ollama já manda em cada resposta
+    ('stop' = terminou sozinha; 'length' = cortada à força por bater
+    num tecto de tamanho — hoje só o num_ctx, ver config.py) — 10 Ago
+    2026, estava a ser recebido e ignorado. Incidente real que motivou
+    isto: respostas a listas
+    longas entravam em ciclo de repetição e cortavam a meio de uma
+    palavra, sem qualquer aviso — o utilizador só descobria olhando
+    para o texto. Devolvido à parte (não misturado dentro do dict da
+    mensagem) para não poluir o objecto antes de ele ser reenviado à
+    Ollama como contexto na volta seguinte."""
     body_dict = {
         "model": config.MODEL,
         "messages": messages,
@@ -94,9 +107,154 @@ def ollama_chat(messages: list, ferramentas: list | None = None, memorias_usadas
         "eval_duration_s": data.get("eval_duration", 0) / 1e9,
         "total_duration_s": data.get("total_duration", 0) / 1e9,
         "tempo_medido_end_to_end_s": tempo_total_medido,
+        "done_reason": data.get("done_reason"),
     })
 
-    return data["message"]
+    return data["message"], data.get("done_reason")
+
+
+# Nível 1 do plano anti-confabulação (10 Ago 2026, ver HISTORICO.md) —
+# verificação MECÂNICA (regex + comparação de texto), não outro pedido
+# ao modelo. Desenhada de propósito para ser genérica, não afinada
+# para o qwen3.5:9b: só olha para texto simples (a resposta final e o
+# que as ferramentas devolveram), nunca para nada específico deste
+# modelo — a ideia, a pedido do utilizador, é que isto continue a
+# valer quando o modelo por baixo mudar (14B, 35B, outro qualquer).
+# Custo: ~0 (nenhuma chamada extra ao modelo, só string matching),
+# nunca atrasa nem gasta tokens a mais — só corre depois de já termos
+# a resposta final.
+#
+# Âmbito deliberadamente estreito: nenhum destes apanha invenções em
+# prosa livre (percentagens fabricadas, afirmações erradas sobre
+# comportamento) — só valores de configuração citados, em 3 formatos
+# de texto diferentes. Começou só com o 1º (10 Ago, incidente
+# MEMORY_TOP_K); ampliado no mesmo dia depois de um 2º incidente
+# escapar: `config.OPTIONS` tem chaves em MINÚSCULAS (`temperature`,
+# `num_ctx`...), não maiúsculas, e uma resposta citou-as numa tabela
+# markdown (`| num_ctx | 16384 |`) — nem o nome nem o formato batiam
+# com o padrão original, a verificação nunca chegou a correr. Testado
+# ao vivo que isto reproduzia (ver HISTORICO.md).
+_PADRAO_CONSTANTE = re.compile(
+    r"\b([A-Z][A-Z0-9_]{2,})\s*=\s*"
+    r"(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|-?\d+(?:\.\d+)?|True|False|None)"
+)
+# Chave de dicionário Python, como config.OPTIONS escreve as suas
+# ("temperature": 0.2,) — cobre tanto o ficheiro real (o que
+# ler_ficheiro devolve tal e qual) como uma resposta que cite a mesma
+# sintaxe num bloco de código.
+_PADRAO_CHAVE_DICT = re.compile(
+    r"[\"']([a-z][a-z0-9_]{2,})[\"']\s*:\s*"
+    r"(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|-?\d+(?:\.\d+)?|True|False|None)"
+)
+# Linha de tabela markdown, ex.: "| `num_ctx` | 16384 | ..." — formato
+# muito comum nas respostas do SUPERDEV quando comparam "actual vs.
+# sugerido", confirmado nos logs de hoje.
+_PADRAO_LINHA_TABELA = re.compile(
+    r"\|\s*`?([A-Za-z_][A-Za-z0-9_]*)`?\s*\|\s*"
+    r"(-?\d+(?:\.\d+)?|True|False|None)\s*\|"
+)
+_PADRAO_NOME_SOLTO = re.compile(r"\b[A-Z][A-Z0-9_]{2,}\b")
+
+# Frases de incerteza — segundo padrão (10 Ago 2026), motivado por um
+# caso real que o padrão acima (NOME = valor) NÃO apanhou: o modelo
+# nunca escreveu "MEMORY_TOP_K = 5" (uma afirmação directa, fácil de
+# comparar) — escreveu "k e MEMORY_TOP_K não estão explícitos
+# (provavelmente 5 ou 10)", quando MEMORY_TOP_K=3 estava mesmo ali no
+# texto da ferramenta lida na mesma troca. Confirmado ao testar: o
+# padrão _PADRAO_CONSTANTE sozinho não apanhava este caso, precisou
+# deste segundo.
+_FRASES_DE_INCERTEZA = (
+    "não está explícit", "não estão explícit", "não está definid",
+    "não estão definid", "provavelmente", "não tenho a certeza",
+    "não sei ao certo", "não é claro", "não aparece explícit",
+    "não aparece definid", "não aparece no código",
+)
+
+
+def _constantes_citadas(texto: str) -> dict[str, str]:
+    """Extrai pares nome->valor de um texto, juntando os 3 formatos
+    (constante Python, chave de dict, linha de tabela markdown — ver
+    padrões acima). Nomes normalizados para minúsculas só para efeitos
+    de comparação (config.OPTIONS usa minúsculas, o resto das
+    constantes usa maiúsculas — um único caminho de comparação chega,
+    não vale a pena complicar). Em caso de repetição do mesmo nome,
+    fica o último visto — suficiente para este fim."""
+    pares = {}
+    for padrao in (_PADRAO_CONSTANTE, _PADRAO_CHAVE_DICT, _PADRAO_LINHA_TABELA):
+        for nome, valor in padrao.findall(texto):
+            pares[nome.lower()] = valor
+    return pares
+
+
+def _alegacoes_falsas_de_incerteza(resposta: str, reais: dict) -> list[str]:
+    """Frase a frase, se a frase tiver uma expressão de dúvida
+    (_FRASES_DE_INCERTEZA) E mencionar o nome de uma constante que na
+    verdade apareceu com um valor concreto no texto das ferramentas
+    desta troca, é quase certo que o modelo está a "adivinhar em voz
+    alta" algo que já tinha lido — sinalizado, não corrigido sozinho."""
+    encontradas = []
+    for frase in re.split(r"(?<=[.!?])\s+", resposta):
+        frase_min = frase.lower()
+        if not any(gancho in frase_min for gancho in _FRASES_DE_INCERTEZA):
+            continue
+        for nome in _PADRAO_NOME_SOLTO.findall(frase):
+            nome_norm = nome.lower()
+            if nome_norm in reais:
+                encontradas.append(f"{nome} (disseste que não sabias, mas li {nome}={reais[nome_norm]} nesta troca)")
+    return encontradas
+
+
+def _verificar_grounding(resposta: str, mensagens: list) -> str:
+    """Confere se as constantes que a resposta final cita — ou diz não
+    saber — batem certo com o que as ferramentas desta troca realmente
+    devolveram. Não corrige sozinha (podia estar a inventar a
+    correcção também) — só torna a suspeita visível, para o utilizador
+    decidir."""
+    # CORRIGIDO 10 Ago 2026 — a condição de saída antecipada aqui era
+    # demasiado permissiva: media se ALGUMA constante reconhecida foi
+    # lida (reais vazio → desistia logo), não se houve leitura
+    # nenhuma. Incidente real que isto escondia: um pedido só
+    # pesquisou "LOG_FILE" (irrelevante), e a resposta afirmou 6
+    # valores de config.OPTIONS com total confiança — como "reais"
+    # ficava vazio (nada bateu com o padrão de então), a verificação
+    # desistia sem tentar, em vez de assinalar tudo como não
+    # confirmado (o que é a suspeita certa quando houve leitura mas
+    # nada dela bate com o que foi citado).
+    if not any(m.get("role") == "tool" for m in mensagens):
+        return resposta  # não houve ferramentas nesta troca, nada a confirmar
+
+    texto_ferramentas = "\n".join(
+        m["content"] for m in mensagens if m.get("role") == "tool" and m.get("content")
+    )
+    reais = _constantes_citadas(texto_ferramentas)
+
+    citadas = _constantes_citadas(resposta)
+    contradicoes = []
+    nao_confirmadas = []
+    for nome, valor in citadas.items():
+        if nome in reais:
+            if reais[nome] != valor:
+                contradicoes.append(f"{nome}={valor} (o que li diz {nome}={reais[nome]})")
+        else:
+            nao_confirmadas.append(f"{nome}={valor}")
+
+    falsas_duvidas = _alegacoes_falsas_de_incerteza(resposta, reais)
+
+    if not contradicoes and not nao_confirmadas and not falsas_duvidas:
+        return resposta
+
+    aviso = "\n\n---\n[SUPERDEV — verificação automática de constantes citadas]"
+    if contradicoes:
+        aviso += "\n⚠️ Contradiz o que li nesta troca: " + "; ".join(contradicoes)
+    if falsas_duvidas:
+        aviso += "\n⚠️ Disseste \"não sei\" sobre algo que li nesta troca: " + "; ".join(falsas_duvidas)
+    if nao_confirmadas:
+        aviso += (
+            "\n(Não confirmados nos ficheiros lidos nesta troca — podem "
+            "estar certos noutro ficheiro não lido agora, ou inventados: "
+            + "; ".join(nao_confirmadas) + ")"
+        )
+    return resposta + aviso
 
 
 def build_system_prompt(pedido: str, tenant_id: str | None = None):
@@ -197,7 +355,7 @@ def _destilar(buffer_destilar: list, tenant_id: str | None = None) -> None:
         },
         {"role": "user", "content": prompt_destilacao},
     ]
-    resposta = ollama_chat(mensagens, memorias_usadas=[])
+    resposta, _ = ollama_chat(mensagens, memorias_usadas=[])
     texto = (resposta.get("content") or "").strip()
     if not texto or texto.upper() == "NADA":
         return
@@ -225,10 +383,26 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
     resposta = None
     tentativas = []  # ver comentário abaixo — só usado se o limite for excedido
     for _ in range(MAX_VOLTAS_FERRAMENTAS):
-        mensagem = ollama_chat(mensagens, ferramentas=tools.TOOL_DEFS, memorias_usadas=memorias_usadas)
+        mensagem, done_reason = ollama_chat(
+            mensagens, ferramentas=tools.TOOL_DEFS, memorias_usadas=memorias_usadas
+        )
 
         if not mensagem.get("tool_calls"):
             resposta = mensagem.get("content", "")
+            if done_reason == "length":
+                # Aviso explícito em vez de corte silencioso — 10 Ago
+                # 2026, ver ollama_chat(). O utilizador via a resposta
+                # parar a meio de uma palavra sem perceber porquê.
+                # Sem "num_predict" fixo (ver config.py — removido no
+                # mesmo dia), só pode acontecer isto encher o próprio
+                # num_ctx, por isso a mensagem já não cita um número de
+                # tokens específico — não há mais um 2º tecto artificial
+                # com um valor fixo para citar.
+                resposta += (
+                    "\n\n[SUPERDEV: resposta cortada — enchi a janela de "
+                    "contexto (num_ctx) antes de terminar. Pede-me para "
+                    "continuar, ou torna a pergunta mais específica.]"
+                )
             break
 
         mensagens.append(mensagem)
@@ -258,6 +432,11 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
             f"({MAX_VOLTAS_FERRAMENTAS}) sem chegar a uma resposta final. "
             f"Tentativas: {'; '.join(tentativas)}"
         )
+    else:
+        # Nível 1 do plano anti-confabulação — só faz sentido quando
+        # houve mesmo uma resposta final (o ramo acima já é um erro
+        # sem constantes citadas a verificar).
+        resposta = _verificar_grounding(resposta, mensagens)
 
     # Fase de testes (9 Ago 2026, a pedido do utilizador): grava a
     # conversa real (pergunta+resposta), não só métricas — para o
@@ -297,7 +476,14 @@ def main():
     2026) — antes era só `input("> ")` seguido da resposta sem nada a
     dizer quem escreveu o quê, confuso numa conversa mais longa. Cor
     só se o terminal a suportar (`isatty`) — nunca em ficheiro/pipe,
-    para não sujar logs com códigos de escape."""
+    para não sujar logs com códigos de escape.
+
+    Tempo por resposta (10 Ago 2026) — este é o caminho de teste
+    "limpo": chama responder() directamente, sem HTTP, sem Open WebUI,
+    sem nenhum dos pedidos escondidos que ele injecta por trás (ver
+    HISTORICO.md, incidente do mesmo dia). Para servir bem de bancada
+    de testes falta saber logo ali quanto tempo cada resposta demorou,
+    sem ir aos logs — por isso mostrado inline, não só registado."""
     cor = sys.stdout.isatty()
     TU = "\033[33mTu\033[0m" if cor else "Tu"
     AGENTE = "\033[36mSUPERDEV\033[0m" if cor else "SUPERDEV"
@@ -313,8 +499,10 @@ def main():
             break
         if not pedido:
             continue
+        inicio = time.time()
         resposta = responder(pedido, sessao)
-        print(f"\n{AGENTE}: {resposta}\n\n{SEPARADOR}\n")
+        duracao = time.time() - inicio
+        print(f"\n{AGENTE} ({duracao:.1f}s): {resposta}\n\n{SEPARADOR}\n")
 
 
 if __name__ == "__main__":

@@ -45,11 +45,26 @@ o "reenviar tudo" N vezes, só que N maior. Ler vários ficheiros numa
 só volta corta as voltas necessárias de ~N para ~1-2, sem tocar no
 limite. Mesmo espírito só-leitura das outras: falha de forma clara por
 ficheiro (reaproveita ler_ficheiro), nunca inventa.
+
+Ferramenta 6, pesquisar_web (10 Ago 2026) — primeira ferramenta que sai
+da máquina. Motivada pelo utilizador: queria testar o agente com
+perguntas que precisam de informação actual, não só código local. Usa
+o SearXNG que já corre no Docker local (config.SEARXNG_HOST) — sem
+chave de API nenhuma, sem enviar nada para fora desta máquina (o
+SearXNG é que fala com os motores de busca reais). Mesmo espírito das
+outras: falha de forma clara se o SearXNG estiver em baixo, nunca
+inventa um resultado.
 """
 import fnmatch
+import json
 import os
 import subprocess
 import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+
+import config
 
 # Limite simples para não rebentar a janela de contexto com um
 # ficheiro enorme.
@@ -75,10 +90,26 @@ RUFF_TIMEOUT_S = 5
 LIMITE_FICHEIROS_LOTE = 15
 LIMITE_CARACTERES_LOTE = 30000
 
+# pesquisar_web — poucos resultados de propósito (mesma filosofia dos
+# outros limites): o modelo já recebe pouco contexto por resultado
+# (título+resumo, sem o conteúdo completo da página), 5 chega para
+# decidir se vale a pena e não enche o prompt com ruído.
+LIMITE_RESULTADOS_WEB = 5
+PESQUISA_WEB_TIMEOUT_S = 8
 
-def ler_ficheiro(caminho: str) -> str:
-    """Lê um ficheiro de texto do disco. Falha de forma clara se não
-    existir ou não for legível — nunca inventa conteúdo."""
+
+def ler_ficheiro(caminho: str, inicio: int = 0) -> str:
+    """Lê um ficheiro de texto do disco, a partir do caractere `inicio`
+    (0 = desde o princípio). Falha de forma clara se não existir ou
+    não for legível — nunca inventa conteúdo.
+
+    `inicio` existe por um bug real (10 Ago 2026): um ficheiro maior
+    que LIMITE_CARACTERES corta, e o modelo, ao pedirem-lhe para
+    "continuar a ler", só sabia voltar a chamar ler_ficheiro sem mais
+    nada — o que devolvia o MESMO excerto cortado no MESMO sítio,
+    outra vez (confirmado a reproduzir: 2 chamadas seguidas, resultado
+    idêntico). A mensagem de corte agora diz exactamente que valor de
+    `inicio` usar a seguir, para o ciclo poder mesmo avançar."""
     caminho = os.path.abspath(os.path.expanduser(caminho))
     if not os.path.isfile(caminho):
         return f"[ERRO] Ficheiro não encontrado: {caminho}"
@@ -88,11 +119,22 @@ def ler_ficheiro(caminho: str) -> str:
     except Exception as e:
         return f"[ERRO] Não foi possível ler o ficheiro: {e}"
 
+    tamanho_total = len(conteudo)
+    if inicio:
+        if inicio >= tamanho_total:
+            return (
+                f"[AVISO] inicio={inicio} está para lá do fim do ficheiro "
+                f"({tamanho_total} caracteres no total) — nada mais para ler."
+            )
+        conteudo = conteudo[inicio:]
+
     if len(conteudo) > LIMITE_CARACTERES:
+        fim = inicio + LIMITE_CARACTERES
         conteudo = (
             conteudo[:LIMITE_CARACTERES]
-            + f"\n...[cortado — ficheiro tem {len(conteudo)} caracteres, "
-              f"só os primeiros {LIMITE_CARACTERES} foram lidos]"
+            + f"\n...[cortado — a mostrar caracteres {inicio}-{fim} de "
+              f"{tamanho_total} no total. Para continuar, chama "
+              f"ler_ficheiro outra vez com inicio={fim}.]"
         )
     return conteudo
 
@@ -261,6 +303,38 @@ def ler_varios_ficheiros(caminhos: list) -> str:
     return resultado
 
 
+def pesquisar_web(query: str) -> str:
+    """Pesquisa na web através do SearXNG local (config.SEARXNG_HOST) e
+    devolve título + resumo + URL dos primeiros resultados. Falha de
+    forma clara se o SearXNG estiver em baixo ou não responder a
+    tempo — nunca inventa um resultado."""
+    url = f"{config.SEARXNG_HOST}/search?" + urllib.parse.urlencode(
+        {"q": query, "format": "json"}
+    )
+    req = urllib.request.Request(url, headers={"User-Agent": "SUPERDEV/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=PESQUISA_WEB_TIMEOUT_S) as r:
+            dados = json.loads(r.read())
+    except urllib.error.URLError as e:
+        return f"[ERRO] Não foi possível contactar o SearXNG ({config.SEARXNG_HOST}): {e}"
+    except TimeoutError:
+        return f"[ERRO] SearXNG excedeu o tempo limite ({PESQUISA_WEB_TIMEOUT_S}s)."
+    except json.JSONDecodeError:
+        return "[ERRO] SearXNG devolveu uma resposta que não é JSON válido."
+
+    resultados = dados.get("results") or []
+    if not resultados:
+        return f"[SEM RESULTADOS] A pesquisa por '{query}' não devolveu nada."
+
+    partes = []
+    for r in resultados[:LIMITE_RESULTADOS_WEB]:
+        titulo = (r.get("title") or "(sem título)").strip()
+        resumo = (r.get("content") or "").strip()
+        link = r.get("url") or ""
+        partes.append(f"- {titulo}\n  {resumo}\n  {link}")
+    return "\n".join(partes)
+
+
 # Definições no formato nativo da Ollama (compatível com a convenção
 # OpenAI de function-calling) — é isto que vai no campo "tools" do
 # pedido à API.
@@ -283,7 +357,12 @@ TOOL_DEFS = [
                 "Reads the content of a text file from disk. If you need "
                 "more than one file, use ler_varios_ficheiros instead — "
                 "one round-trip for all of them is much cheaper than one "
-                "round-trip per file."
+                "round-trip per file. If the result was cut off (file "
+                "bigger than the character limit), the cutoff message "
+                "tells you the exact 'inicio' value to pass on the next "
+                "call to keep reading from where it stopped — calling "
+                "ler_ficheiro again with the same arguments just returns "
+                "the same cut-off excerpt, not the rest of the file."
             ),
             "parameters": {
                 "type": "object",
@@ -291,6 +370,15 @@ TOOL_DEFS = [
                     "caminho": {
                         "type": "string",
                         "description": "Absolute path of the file to read",
+                    },
+                    "inicio": {
+                        "type": "integer",
+                        "description": (
+                            "Character offset to start reading from — 0 "
+                            "(default) reads from the beginning. Use the "
+                            "value given in a previous cutoff message to "
+                            "continue reading a large file."
+                        ),
                     },
                 },
                 "required": ["caminho"],
@@ -386,6 +474,29 @@ TOOL_DEFS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "pesquisar_web",
+            "description": (
+                "Searches the web for current information (news, "
+                "docs, anything outside this project's local files). "
+                "Returns title, short summary, and URL for the top "
+                "results. Use this instead of guessing when a question "
+                "needs up-to-date or external information."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
 ]
 
 # Mapa nome -> função real, para executar o que o modelo pedir.
@@ -395,4 +506,5 @@ FUNCOES = {
     "procurar_texto": procurar_texto,
     "correr_ruff": correr_ruff,
     "ler_varios_ficheiros": ler_varios_ficheiros,
+    "pesquisar_web": pesquisar_web,
 }

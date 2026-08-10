@@ -25,6 +25,14 @@ dotenv.load_dotenv(os.path.join(BASE_DIR, "db", ".env"))
 # /etc/systemd/system/ollama.service.d/override.conf (OLLAMA_HOST).
 OLLAMA_HOST = "http://127.0.0.1:11435"
 
+# --- Ligação à pesquisa web (10 Ago 2026) --------------------------------
+# SearXNG já corre localmente para outros projectos (container "searxng",
+# porta 8888) — reaproveitado em vez de meter uma API paga (Google/Bing/
+# Brave) só para isto. Sem chave nenhuma: confirmado ao vivo que o
+# endpoint /search?format=json já responde sem qualquer configuração
+# extra no container. Ver ferramenta pesquisar_web em tools.py.
+SEARXNG_HOST = "http://127.0.0.1:8888"
+
 # --- Ligação à base de dados de memória (pgvector, 9 Ago 2026) ---------
 # Container isolado próprio (db/docker-compose.yml), porta 5443 — ver
 # portas_reservadas_sistema na memória do utilizador. Falha de forma
@@ -76,11 +84,19 @@ OPTIONS = {
     "top_p": 0.95,
     "top_k": 20,
 
-    # Redundante mas inofensivo: é o próprio valor por defeito da
-    # Ollama quando nada é dito, e o Qwen não define este parâmetro no
-    # Modelfile (usa presence_penalty como travão de repetição — ver
-    # nota abaixo). Mantido explícito por clareza.
-    "repeat_penalty": 1.1,
+    # SUBIDO de 1.1 (default herdado, redundante) para 1.3 — 10 Ago
+    # 2026, incidente real visto nos logs de teste do utilizador:
+    # pedidos tipo "o que farias diferente" (lista longa, item a item)
+    # entravam num ciclo a repetir blocos inteiros já escritos (não só
+    # palavras/frases soltas — parágrafos completos idênticos,
+    # confirmado em logs/conversas.jsonl), até bater no tecto de
+    # num_predict e cortar a meio de uma palavra. O presence_penalty=1.5
+    # herdado do Modelfile (ver nota abaixo, não mexido) penaliza um
+    # token já visto, mas não travou blocos estruturados inteiros a
+    # repetirem-se. Ainda por confirmar com mais uso real se 1.3 chega
+    # ou se é preciso subir mais — primeira tentativa, não afinação
+    # exaustiva.
+    "repeat_penalty": 1.3,
 
     # NOTA IMPORTANTE: não definimos "presence_penalty" aqui — e isso
     # é intencional, não um esquecimento. Confirmado nos docs da
@@ -107,12 +123,20 @@ OPTIONS = {
     # que este agente precisa por agora.
     "num_ctx": 16384,
 
-    # Tecto de segurança para o tamanho da resposta — antes não havia
-    # nenhum (só limitado pelo espaço livre no num_ctx). Para um
-    # agente que promete "respostas curtas e directas", uma resposta a
-    # fugir do previsto devia ser a excepção, não algo só travado pelo
-    # limite físico do contexto.
-    "num_predict": 2048,
+    # REMOVIDO o tecto fixo de 2048 — 10 Ago 2026, a pedido do
+    # utilizador. Histórico: posto a 9 Ago como rede de segurança
+    # (antes disso, uma resposta a fugir do previsto só parava ao
+    # encher o num_ctx todo). Mas a causa real de uma resposta longa
+    # descontrolada era o ciclo de repetição corrigido no mesmo dia
+    # (ver repeat_penalty acima) — este tecto só estava a cortar
+    # respostas legítimas que precisassem de ser compridas (ex.: listas
+    # exaustivas item a item), sem resolver o problema de fundo. -1 =
+    # sem tecto artificial, só limitado pelo num_ctx acima (a rede de
+    # segurança real). O aviso de corte em agent.py (done_reason ==
+    # "length") continua activo — se um dia isto encher o num_ctx a
+    # sério, o utilizador ainda é avisado, só não há mais um 2º tecto
+    # artificial mais baixo a cortar primeiro.
+    "num_predict": -1,
 }
 
 # Modo "thinking" do qwen3.5 — TESTADO 8 Ago 2026, ver logs/.
@@ -163,7 +187,41 @@ CORE_IDENTITY = (
     # saber qual, mesmo sendo essa a sua própria pasta.
     f"Your own project folder, where your source code and files live, "
     f"is at the absolute path {BASE_DIR} — use it as the base when a "
-    f"file/folder tool request doesn't give you a full path."
+    f"file/folder tool request doesn't give you a full path. "
+    # 10 Ago 2026 — Nível 0 do plano anti-confabulação (ver HISTORICO.md,
+    # incidente real: o modelo leu MEMORY_TOP_K=3 e MEMORIA_CURTO_PRAZO_
+    # TROCAS=4 no próprio texto de uma ferramenta, e mesmo assim escreveu
+    # "provavelmente 5 ou 10"/"10 ou 20" na resposta final). A regra
+    # genérica de cima ("never invent facts") já existia e não chegou —
+    # modelos pequenos respondem melhor a regras estreitas e concretas
+    # do que a princípios largos. Esta é sobre o caso específico que
+    # falhou: números/constantes citados de cabeça em vez de olhados.
+    # Rede de segurança de verdade é o Nível 1 (verificação mecânica em
+    # agent.py) — isto sozinho reduz, não garante.
+    "When stating a specific number, config value, or named constant "
+    "(e.g. SOME_CONSTANT = 5), only do so if you can point to the "
+    "exact tool result text where you saw it earlier in THIS "
+    "conversation — never recall it from general knowledge, training "
+    "data, or a similar-looking project. If you're not sure of the "
+    "exact value, say so explicitly instead of guessing a plausible "
+    "one. "
+    # 10 Ago 2026 — motivado por um caso real: um ficheiro grande
+    # cortava (LIMITE_CARACTERES em tools.py), o modelo parava e
+    # perguntava "posso continuar a ler?" em vez de continuar sozinho.
+    # O utilizador tinha de responder "sim" — uma volta inteira gasta
+    # (a pergunta dele + a resposta seguinte) só para dizer o óbvio,
+    # quando já havia voltas de ferramentas de sobra para continuar
+    # sem perguntar (ler_ficheiro agora aceita "inicio" para continuar
+    # exactamente daí, ver tools.py).
+    "You have several tool-call rounds available per request. If a "
+    "file read comes back cut off and reading more of it is needed to "
+    "properly answer the user's original request, keep calling tools "
+    "yourself right away (e.g. ler_ficheiro again with the 'inicio' "
+    "the cutoff message gave you) — do NOT stop and ask the user for "
+    "permission to keep reading. Only ask the user something when you "
+    "genuinely lack information only they can give you (e.g. an "
+    "ambiguous path, a choice between real alternatives) — never for "
+    "a mechanical next step you can already do yourself."
 )
 
 # --- Memória (RAG mínimo) ------------------------------------------------
