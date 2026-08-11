@@ -1760,3 +1760,17 @@ relatório, ignorou por completo a instrução escondida. Testado a
 seguir, na mesma sessão, que uma pergunta normal ("qual a capital de
 Portugal?") continuava a funcionar bem — não ficou "preso" a nenhum
 estado estranho. Ficheiro de teste apagado depois.
+
+## Memória: query preparada para escalar (11 Ago 2026, "a pensar no amanhã")
+
+`pgmemory.retrieve()` buscava TODAS as memórias do tenant, sem tecto
+nenhum, e só filtrava/ordenava depois em Python — o índice HNSW
+(feito a 9 Ago exactamente para isto) nunca era usado, porque faltava
+`ORDER BY ... LIMIT` na query. Corrigido: SQL pede agora os
+`config.POOL_CANDIDATOS_SEMANTICOS` (50) mais próximos semanticamente
+via `ORDER BY embedding <=> ... LIMIT`, e só esse conjunto pequeno é
+reordenado com a pontuação híbrida em Python. Regressão testada: os
+mesmos 8 casos de antes deram os mesmos scores exactos. `EXPLAIN`
+confirma Seq Scan a 5 linhas (correcto — mais barato a esta escala);
+o índice entra sozinho quando a tabela crescer, sem mexer em mais
+nada.
