@@ -12,6 +12,26 @@ import dotenv
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# --- Sandbox de caminhos das ferramentas de leitura (11 Ago 2026) -------
+# ACHADO REAL: até agora, ler_ficheiro/procurar_texto/etc. (tools.py)
+# não tinham limite nenhum — liam qualquer ficheiro que o utilizador do
+# SO tivesse permissão para ler, não só os do projecto. Sem exploração
+# nenhuma a provar isto (foi revisto por inspecção de código, a pedido
+# explícito do utilizador sobre segurança do motor em si, separado da
+# conversa sobre a sandbox do CodeAct), mas o risco é real e cresce à
+# medida que a visão do projecto avança: SUPERDEV é para ser o motor
+# reaproveitado por outros agentes especialistas na mesma máquina
+# (superadvogado, supercontabilista, etc.) — cada um só deve ver a sua
+# própria pasta, nunca a dos outros nem o resto do disco.
+#
+# Por omissão, RAIZ_PERMITIDA = a própria pasta do SUPERDEV (BASE_DIR)
+# — bate certo com o uso real até hoje (todo o HISTORICO.md é sobre
+# ferramentas a analisar o próprio código do projecto, nunca outro
+# repo). Se um dia for preciso alargar (ex.: analisar outro projecto
+# do utilizador), é uma mudança de 1 linha aqui — decisão explícita,
+# não um alargamento silencioso.
+RAIZ_PERMITIDA = BASE_DIR
+
 # Carrega db/.env para o ambiente — é o ÚNICO sítio onde a password da
 # BD existe, nunca escrita aqui no código. CORRIGIDO 9 Ago 2026: antes
 # a password estava directamente numa string neste ficheiro, que já

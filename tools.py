@@ -64,9 +64,15 @@ quando só precisa de uma visão geral. Usa só `ast` (biblioteca
 padrão, sem dependência nova). Limitação deliberada: só Python — o
 projecto é só Python, e um mapa genérico multi-linguagem seria muito
 mais caro de construir para um ganho que não existe aqui.
+
+SANDBOX DE CAMINHOS (11 Ago 2026) — toda a ferramenta que toca no
+disco valida o caminho contra config.RAIZ_PERMITIDA antes de o abrir
+(ver _validar_caminho abaixo e a nota em config.py para o porquê).
+Testado primeiro no protótipo `/mnt/sovereign/superdevsandbox/`
+(sandbox do CodeAct) — o mesmo padrão trazido para aqui depois de
+confirmado a funcionar lá.
 """
 import ast
-import fnmatch
 import json
 import os
 import subprocess
@@ -76,6 +82,22 @@ import urllib.parse
 import urllib.request
 
 import config
+
+
+def _validar_caminho(caminho: str) -> str | None:
+    """Devolve o caminho absoluto se estiver dentro de
+    config.RAIZ_PERMITIDA, ou None se estiver fora (incluindo
+    tentativas de fuga com `..`) — chamado no início de toda função
+    que toca no disco, antes de qualquer os.path.isfile/isdir/walk.
+    Mesma função, quase carácter a carácter, do protótipo
+    superdevsandbox/ferramentas.py — lá foi testado com tentativas de
+    fuga a sério (../.. e caminho absoluto, ambos bloqueados)."""
+    absoluto = os.path.abspath(os.path.expanduser(caminho))
+    raiz = os.path.abspath(config.RAIZ_PERMITIDA)
+    if absoluto != raiz and not absoluto.startswith(raiz + os.sep):
+        return None
+    return absoluto
+
 
 # Limite simples para não rebentar a janela de contexto com um
 # ficheiro enorme.
@@ -128,7 +150,9 @@ def ler_ficheiro(caminho: str, inicio: int = 0) -> str:
     outra vez (confirmado a reproduzir: 2 chamadas seguidas, resultado
     idêntico). A mensagem de corte agora diz exactamente que valor de
     `inicio` usar a seguir, para o ciclo poder mesmo avançar."""
-    caminho = os.path.abspath(os.path.expanduser(caminho))
+    caminho = _validar_caminho(caminho)
+    if caminho is None:
+        return "[ERRO] Caminho fora da pasta permitida do projecto."
     if not os.path.isfile(caminho):
         return f"[ERRO] Ficheiro não encontrado: {caminho}"
     try:
@@ -160,7 +184,9 @@ def ler_ficheiro(caminho: str, inicio: int = 0) -> str:
 def listar_ficheiros(caminho: str) -> str:
     """Lista o conteúdo de uma pasta (não recursivo). Falha de forma
     clara se a pasta não existir ou não for uma pasta."""
-    caminho = os.path.abspath(os.path.expanduser(caminho))
+    caminho = _validar_caminho(caminho)
+    if caminho is None:
+        return "[ERRO] Caminho fora da pasta permitida do projecto."
     if not os.path.isdir(caminho):
         return f"[ERRO] Pasta não encontrada: {caminho}"
     try:
@@ -188,7 +214,9 @@ def procurar_texto(caminho: str, termo: str) -> str:
     de texto dentro dela (recursivo). Devolve "caminho:linha: texto"
     por cada ocorrência, até ao limite. Falha de forma clara se o
     caminho não existir."""
-    caminho = os.path.abspath(os.path.expanduser(caminho))
+    caminho = _validar_caminho(caminho)
+    if caminho is None:
+        return "[ERRO] Caminho fora da pasta permitida do projecto."
     if not os.path.exists(caminho):
         return f"[ERRO] Caminho não encontrado: {caminho}"
 
@@ -394,7 +422,9 @@ def listar_simbolos(caminho: str) -> str:
     antes de decidir se vale a pena ler uma função específica). Falha
     de forma clara por ficheiro (sintaxe inválida não pára os
     restantes) — nunca inventa uma assinatura."""
-    caminho = os.path.abspath(os.path.expanduser(caminho))
+    caminho = _validar_caminho(caminho)
+    if caminho is None:
+        return "[ERRO] Caminho fora da pasta permitida do projecto."
     if not os.path.exists(caminho):
         return f"[ERRO] Caminho não encontrado: {caminho}"
 

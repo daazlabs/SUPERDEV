@@ -1661,3 +1661,45 @@ perguntou se devia continuar — com o aviso mecânico no fim. (2) um
 pedido simples de controlo (listar uma pasta) — sem regressão, resposta
 normal, sem o aviso (confirma que só dispara na última volta a sério).
 `ruff check agent.py` limpo.
+
+## Segurança do motor — ferramentas de leitura limitadas à pasta do projecto (11 Ago 2026)
+
+Depois do `superdevsandbox` (protótipo à parte do CodeAct — ver o
+`HISTORICO.md` desse projecto), o utilizador quis rever o motor do
+SUPERDEV em si antes de o especializar mais em programação. Ao
+perguntar sobre segurança, achado real, nunca antes revisto: `ler_
+ficheiro`/`procurar_texto`/`listar_ficheiros`/`listar_simbolos` não
+tinham nenhum limite de pasta — liam qualquer caminho legível pelo
+utilizador do SO, não só os do projecto. Contexto que tornou isto
+prioritário: a visão do utilizador é o SUPERDEV ser o motor
+reaproveitado por outros agentes especialistas (superadvogado,
+supercontabilista, etc.) na mesma máquina — cada um só deve ver a sua
+própria pasta.
+
+Corrigido com o mesmo padrão já testado horas antes no
+`superdevsandbox`: `config.RAIZ_PERMITIDA = BASE_DIR` (por omissão, a
+própria pasta do projecto — mudança de 1 linha se um dia for preciso
+alargar) + `tools._validar_caminho()`, chamada no início de `ler_
+ficheiro`, `listar_ficheiros`, `procurar_texto`, `listar_simbolos` (o
+`ler_varios_ficheiros` herda automaticamente, chama `ler_ficheiro`
+por dentro).
+
+**Testado em duas camadas:** (1) unitário — leitura dentro da pasta
+funciona; `../../etc/passwd`, `/etc/passwd` absoluto, e o mesmo em
+`listar_ficheiros`/`procurar_texto`/`listar_simbolos`/dentro de um
+lote do `ler_varios_ficheiros`, todos bloqueados com a mesma mensagem
+clara. (2) Ponta-a-ponta a sério, servidor reiniciado, pedido real
+via HTTP: "lê `/etc/passwd`" → recusado com explicação clara e
+alternativas sugeridas (não um erro cru); pedido normal dentro do
+projecto → continua a funcionar.
+
+**Achado lateral, honesto, não relacionado com esta correcção**: um
+pedido com caminho relativo ambíguo ("o que há na pasta PESQUISA/")
+falhou uma vez porque o modelo formou o caminho como `/PESQUISA`
+(sem o prefixo `BASE_DIR`) em vez de `PESQUISA` ou do caminho
+absoluto completo — com o caminho absoluto completo, funcionou bem
+(retestado, confirmado). Isto já aconteceria antes desta correcção
+também (só que com "não encontrado" em vez de "fora da pasta
+permitida") — não é uma regressão de hoje, é uma inconsistência
+pré-existente de como o modelo às vezes forma caminhos relativos,
+fora do âmbito desta tarefa.
