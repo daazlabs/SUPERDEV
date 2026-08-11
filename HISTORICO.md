@@ -1446,3 +1446,218 @@ avalia") — desta vez em **1 troca só**, sem nenhum "posso continuar?":
 constante mais ao fundo do ficheiro, adicionada ontem), 29.8s,
 avaliação completa e coerente, "Veredito: Excelente implementação,
 pronta para uso em produção."
+
+## Pesquisa de mercado (opencode) + verificação ao vivo (11 Ago 2026)
+
+Antes de continuar a afinar o motor à mão, o utilizador pediu uma
+pesquisa de mercado dedicada — ver `PESQUISA/COMANDO-mercado.txt`
+(comando) e `PESQUISA/relatorio-mercado.md` (927 linhas, 6 secções,
+escrito incrementalmente pelo opencode). Enquadramento explícito no
+comando: o SUPERDEV não é para escolher "o melhor modelo" — é o motor
++ ferramentas à volta de qualquer modelo (1B a 120B) — por isso cada
+técnica encontrada foi classificada MODEL-AGNOSTIC vs MODEL-SPECIFIC.
+
+Achados que mais interessam a este projecto: (1) não existe um
+"SUPERDEV pronto" no mercado com a mesma filosofia (motor agnóstico +
+GPU 12GB partilhada); (2) o maior ganho medido é o **CodeAct**
+(benchmark oficial Microsoft Agent Framework: 52% menos latência, 64%
+menos tokens — o modelo escreve um bloco de código que chama as
+ferramentas todas de uma vez, em vez de N idas-e-voltas), mas exige
+sandbox de execução — mudança de paradigma, tratado como projecto à
+parte, não decidido ainda; (3) confirma, com fontes externas (issues
+reais do Ollama e do Qwen Code), que o corte silencioso de contexto é
+"o incidente nº1" do ecossistema de agentes locais, não uma
+excentricidade deste projecto; (4) o `qwen3.5:9b` é justamente o
+tamanho mais instável da família Qwen para tool-calling (9B = XML
+instável; 4B mais fiável; 35B falha consistentemente — issue
+QwenLM/Qwen3.6#125). Matriz de recomendação completa (A=config
+imediata, B=comportamento do motor, C=paradigma, avaliar à parte) na
+secção 6 do relatório.
+
+**Verificação ao vivo feita a seguir (não só ler o relatório):**
+- Recomendação A1 (bug "tool-call impresso como texto em vez de
+  executado", PR ollama/ollama#15022) — **já resolvido**: `ollama
+  --version` na porta 11435 devolve `0.21.0`; o fix entrou na
+  `0.19.0`. Confirmado via `WebFetch` à própria PR no GitHub. Nada a
+  corrigir aqui.
+- Confirmado em `agent.py:64,100` que `config.OPTIONS` (com
+  `num_ctx=16384`) vai sempre explícito em cada pedido — por isso o
+  `OLLAMA_NUM_CTX=4096` do `override.conf` não estava a afectar o
+  SUPERDEV em uso normal.
+- **Achado novo, mais interessante:** `strings $(which ollama) | grep
+  OLLAMA_NUM_CTX` não devolve nada — essa variável **não existe** no
+  binário 0.21.0 instalado; só `OLLAMA_CONTEXT_LENGTH` está lá. Ou
+  seja, a linha `Environment="OLLAMA_NUM_CTX=4096"` no
+  `override.conf` é config morta (mesma classe de achado que o
+  `numctx.conf` morto de 9 Ago — ver secção "OPTIONS revistos item a
+  item") — não faz mal ao SUPERDEV (que já manda `num_ctx` por
+  pedido), mas é uma armadilha para qualquer outro cliente que fale
+  com a porta 11435 sem mandar `options.num_ctx` explícito (cairia no
+  default de fábrica do servidor, historicamente pequeno).
+- Também confirmado no binário: `OLLAMA_KV_CACHE_TYPE` existe e é
+  suportado, mas com uma dependência explícita —
+  "OLLAMA_FLASH_ATTENTION must be enabled to use a quantized
+  OLLAMA_KV_CACHE_TYPE" (string literal no binário). Disponível para
+  activar (secção 3.2/A6 do relatório, até ~75% menos VRAM de KV
+  cache), mas ainda não activado — decisão pendente do utilizador
+  (troca throughput marginal por mais folga de VRAM para os vizinhos).
+- `OLLAMA_MAX_LOADED_MODELS=1` e `OLLAMA_KEEP_ALIVE=30s` já estavam
+  configurados no `override.conf` — batem certo com a recomendação A2
+  do relatório para GPU partilhada. Falta só `OLLAMA_NUM_PARALLEL=1`
+  explícito (hoje corre no default não confirmado do servidor).
+
+**Pendente — precisa de sudo interactivo do utilizador (sem
+passwordless sudo confirmado nesta sessão):** reescrever
+`/etc/systemd/system/ollama.service.d/override.conf` para trocar
+`OLLAMA_NUM_CTX` por `OLLAMA_CONTEXT_LENGTH=16384` (rede de segurança
+correcta, já que o nome antigo é ignorado), acrescentar
+`OLLAMA_NUM_PARALLEL=1`. Depois: `sudo systemctl daemon-reload &&
+sudo systemctl restart ollama`.
+
+**Decisão do utilizador:** deixar `OLLAMA_FLASH_ATTENTION`/
+`OLLAMA_KV_CACHE_TYPE=q4_0` de fora por agora — VRAM já confortável
+com `qwen3.5:9b` (~6GB de folga), sem necessidade urgente de poupar
+KV cache. Revisitar se um dia precisar de mais folga para os vizinhos
+ou um contexto maior.
+
+**Aplicado e testado ao vivo pelo utilizador.** `override.conf`
+reescrito, `sudo systemctl daemon-reload && sudo systemctl restart
+ollama` corrido. Confirmado depois: `systemctl show ollama
+--property=Environment` mostra as 5 variáveis novas activas
+(`OLLAMA_CONTEXT_LENGTH=16384`, `OLLAMA_NUM_PARALLEL=1` incluídos);
+serviço `active`; `curl .../api/version` responde `0.21.0`. Teste
+ponta-a-ponta a sério através do próprio `superdev-server` (porta
+8850, não só o Ollama cru): pedido real devolveu resposta certa
+(`"ok"`), 35.5s — lento só por ser o 1º pedido a seguir ao restart
+(modelo a carregar do disco de novo, não regressão). **Lista A
+fechada** (A1-A5 feitos; A6/KV-cache quantizado adiado por decisão do
+utilizador). Próximo: B4 (medir schema-correct rate do tool-calling
+actual como baseline) antes de decidir sobre B1-B3, e a conversa em
+aberto sobre o CodeAct (C1) como projecto à parte.
+
+**B4 — baseline de schema-correct rate, feito e testado (11 Ago
+2026).** Script novo `PESQUISA/teste-baseline-toolcalling.py`, reusa
+`agent.ollama_chat()` a sério (mesmo `config.OPTIONS`/`THINK`/
+`tools.TOOL_DEFS` de produção, não isolado) — 8 casos (um por
+ferramenta + 2 controlos negativos, perguntas que não devem chamar
+nada) × 5 repetições = 40 chamadas reais ao `qwen3.5:9b`. **Resultado:
+40/40 (100%)** — todas as chamadas com a ferramenta certa e argumentos
+válidos contra o schema; nenhum falso positivo nos controlos negativos
+(perguntas triviais como "quanto é 2+2?" não dispararam ferramenta à
+toa). Relatório linha-a-linha em `PESQUISA/baseline-schema-correct.md`.
+Tempos: 1ª chamada 40.4s (arranque a frio, o modelo tinha descarregado
+por `OLLAMA_KEEP_ALIVE=30s`); depois 14-24s por chamada com ferramentas
+anexadas (mais contexto a avaliar), ~4s nos controlos triviais sem
+ferramenta.
+
+**Aviso de calibração honesto (não empolar o resultado):** este teste
+só cobre o caso fácil — 1 ferramenta óbvia por pedido, sem
+ambiguidade, pergunta em isolado (sem histórico de conversa a
+acumular). NÃO testa: várias tool-calls na mesma resposta (B3, o que
+o relatório recomenda medir a seguir), pedidos ambíguos entre 2
+ferramentas parecidas, código realmente problemático no `correr_ruff`
+(o snippet de teste é trivial e válido), nem o padrão que já causou
+incidentes reais no HISTORICO (sessões longas, `MAX_VOLTAS_
+FERRAMENTAS` esgotado). Serve como baseline honesto do caso simples —
+não é prova de que os incidentes complexos já apanhados estão
+resolvidos.
+
+## B1, B2, B3 — implementados e testados (11 Ago 2026)
+
+Com a baseline B4 (100%) em mãos, avançou-se para as três
+recomendações de comportamento do relatório de mercado (secção 6.2).
+
+**B3 — batching de tool-calls.** Confirmado que o ciclo em
+`agent.responder()` já processava vários `tool_calls` vindos na
+MESMA resposta (`for chamada in mensagem["tool_calls"]:`, sem
+alteração) — só faltava o modelo saber que pode fazer isso.
+Testado ao vivo, 2 pedidos com ferramentas independentes ×
+3 repetições cada, sem a frase e depois com ela: **9/9 com a frase**
+(3 no system prompt isolado inicial + 3 repetido + 3 com o
+`CORE_IDENTITY` real de produção), sempre a agrupar as 2 ferramentas
+na mesma resposta. Frase acrescentada a `config.CORE_IDENTITY`
+("When a request needs multiple tools that don't depend on each
+other's result, call them together..."). Custo: zero — não muda
+nada na maioria dos pedidos, que só precisam de 0-1 ferramenta.
+
+**B2 — `listar_simbolos`, nova ferramenta (contexto selectivo).**
+Usa só `ast` (biblioteca padrão, sem dependência nova) — mapa de
+classes/funções/assinaturas/1ª linha de docstring de um `.py` ou
+pasta, sem o corpo. Testado unitariamente em `tools.py` (o próprio
+ficheiro onde vive): **838 caracteres vs 27194 do ficheiro
+inteiro — 97% menos**, bem acima dos ~65% citados no relatório
+(secção 2.4). Limitação deliberada: só Python (o projecto é só
+Python). Adicionada a `TOOL_DEFS`/`FUNCOES`. Testado ao vivo através
+do modelo real (pedido tipo "o que há neste ficheiro, só as
+funções/classes"): **3/3 escolheu `listar_simbolos` sozinho**, sem
+recorrer ao `ler_ficheiro` completo — o modelo entendeu quando usar
+a ferramenta certa a partir só da descrição em `TOOL_DEFS`.
+
+**B1 — travão de acumulação de tool-outputs dentro de um pedido.**
+Achado de análise antes de codificar: a compactação ENTRE pedidos já
+estava resolvida desde 9 Ago (janela fixa `MEMORIA_CURTO_PRAZO_
+TROCAS=4` + destilação para pgvector) — o risco real que sobrava era
+DENTRO de um único `responder()` com várias voltas de ferramentas,
+onde `mensagens` podia acumular resultados grandes sem tecto (o
+mesmo padrão estrutural que já tinha causado o incidente do
+`num_ctx=4096`). Nova função `agent._comprimir_vaivem_se_necessario`:
+quando o texto acumulado de resultados de ferramentas desta troca
+passa `LIMITE_CARACTERES_VAIVEM=20000`, os resultados mais antigos
+(menos o mais recente) são substituídos por um resumo curto — chamada
+depois de cada volta do ciclo em `responder()`.
+
+Testado em dois níveis: (1) unitário — 3 voltas simuladas (9000,
+15000, 5000 chars), confirma que comprime só quando passa o limiar,
+nunca recomprime o que já está comprimido, e o total volta sempre
+para debaixo do limiar. (2) Integração a sério, reproduzindo o
+padrão do incidente antigo (forçado a ler 4 ficheiros grandes um a
+um, `ler_varios_ficheiros` desactivada de propósito para forçar o
+caso difícil): **o total de texto de ferramentas acumulado nunca
+ultrapassou ~17000 caracteres em nenhuma volta** (contra os ~40000+
+que se teriam somado sem a guarda, só nas primeiras 5 voltas) —
+mecanismo confirmado a funcionar como desenhado.
+
+**Achado lateral, honesto, não escondido:** este teste de integração
+correu 7 voltas (mais que o `MAX_VOLTAS_FERRAMENTAS=5` real) e o
+modelo nunca chegou a uma resposta final — ficou a continuar a ler
+cada ficheiro até ao fim (obedecendo à instrução existente de
+"continuar sozinho a ler ficheiros cortados") em vez de resumir os 4
+com o que já tinha lido. Isto **não é um problema causado pelo B1**
+— é o item já pendente desde 10 Ago ("`MAX_VOLTAS_FERRAMENTAS=5`
+continua baixo para pedidos legítimos grandes") a reaparecer no
+mesmo tipo de caso extremo (vários ficheiros grandes, forçado a
+ler um por um). O B1 torna cada volta mais barata em tokens; não
+resolve sozinho o limite de voltas — fica registado como o mesmo
+pendente de sempre, não um novo.
+
+**Fecho: `superdev-server` reiniciado e testado ponta-a-ponta a
+sério (não só chamadas directas ao módulo).** Pedido real via HTTP
+("o que há em config.py, só funções/constantes") — confirmado no
+`logs/chamadas.jsonl` que chamou `listar_simbolos` mesmo (não
+adivinhou), recebeu "sem classes/funções de topo" (correcto — o
+ficheiro só tem constantes) e respondeu grounded nisso. `ruff check`
+limpo nos 3 ficheiros alterados (só os 6 avisos pré-existentes de
+sempre, nenhum novo). B1/B2/B3 fechados.
+
+## `MAX_VOLTAS_FERRAMENTAS` — degradação suave (11 Ago 2026)
+
+Correcção pequena, discutida antes de codificar: em vez de subir o
+número de voltas (só adiava o problema, mesma lição de 9 Ago), a
+última volta permitida deixa de oferecer ferramentas — o modelo é
+obrigado a responder já com o que já leu, com um pedido curto interno
+(não gravado no histórico real) a dizer-lhe para admitir o que falta
+em vez de adivinhar. Zero chamadas extra ao modelo — continuam a ser
+`MAX_VOLTAS_FERRAMENTAS` no total, só muda o que a última faz. Sempre
+que essa última volta gerar resposta, acrescenta-se também um aviso
+mecânico próprio do SUPERDEV (não depende do modelo se lembrar de
+avisar sozinho) a dizer que pode estar incompleta.
+
+Testado ao vivo, dois casos: (1) o mesmo cenário difícil de ontem (4
+ficheiros grandes, forçado a ler um a um, `ler_varios_ficheiros`
+indisponível de propósito) — em vez do `[ERRO] Excedi o limite...`
+de antes, devolveu um resumo honesto do que já tinha lido (`tools.py`
+parcial), disse explicitamente que faltavam os outros 3 ficheiros, e
+perguntou se devia continuar — com o aviso mecânico no fim. (2) um
+pedido simples de controlo (listar uma pasta) — sem regressão, resposta
+normal, sem o aviso (confirma que só dispara na última volta a sério).
+`ruff check agent.py` limpo.

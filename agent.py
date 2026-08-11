@@ -281,6 +281,46 @@ def build_system_prompt(pedido: str, tenant_id: str | None = None):
 # também na 2ª volta, o modelo pediu correctamente a 2ª ferramenta.
 MAX_VOLTAS_FERRAMENTAS = 5
 
+# B1 (11 Ago 2026, ver PESQUISA/relatorio-mercado.md secções 2.1/6.2)
+# — guarda contra a acumulação de resultados de ferramentas DENTRO de
+# um único pedido. A compactação ENTRE pedidos já estava resolvida (a
+# janela fixa + destilação para pgvector, 9 Ago) — o risco que sobrava
+# era este: cada volta do ciclo em responder() pode acrescentar até
+# tools.LIMITE_CARACTERES_LOTE (30000) caracteres de resultado, e nada
+# limitava quantas voltas grandes se somavam antes da próxima chamada
+# ao modelo — o mesmo padrão estrutural que já causou o corte
+# silencioso do incidente num_ctx=4096 (ver HISTORICO.md). Em vez de
+# esperar pelo corte, comprime-se por código: resultados de ferramentas
+# mais antigos desta troca (menos o mais recente, o que o modelo acabou
+# de pedir) são substituídos por um resumo curto quando o total passa o
+# limiar. Estimativa de caracteres-por-token deliberadamente grosseira
+# — não vale a pena um tokenizer real só para uma margem de segurança.
+LIMITE_CARACTERES_VAIVEM = 20000
+
+
+def _comprimir_vaivem_se_necessario(mensagens: list, inicio_vaivem: int) -> None:
+    """Modifica `mensagens` no próprio sítio — substitui o conteúdo de
+    resultados de ferramentas mais antigos desta troca por um resumo
+    curto, mantendo o mais recente intacto (o que o modelo acabou de
+    pedir, mais provável de ainda ser relevante ao próximo passo). Não
+    mexe em nada antes de `inicio_vaivem` (system+janela+pedido do
+    utilizador — fora do âmbito desta guarda, já resolvido à parte)."""
+    vaivem = mensagens[inicio_vaivem:]
+    total = sum(len(m.get("content") or "") for m in vaivem if m.get("role") == "tool")
+    if total <= LIMITE_CARACTERES_VAIVEM:
+        return
+
+    indices_tool = [i for i, m in enumerate(vaivem) if m.get("role") == "tool"]
+    for i in indices_tool[:-1]:  # todos menos o mais recente
+        conteudo = vaivem[i]["content"] or ""
+        if conteudo.startswith("[COMPRIMIDO"):
+            continue  # já comprimido numa volta anterior, não repetir
+        vaivem[i]["content"] = (
+            f"[COMPRIMIDO — este resultado tinha {len(conteudo)} caracteres, "
+            "omitido para caber na janela de contexto. Pede a mesma "
+            "ferramenta outra vez se precisares mesmo dele.]"
+        )
+
 
 def nova_sessao(tenant_id: str | None = None) -> dict:
     """Estado de uma conversa (9 Ago 2026). Três campos:
@@ -379,16 +419,52 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
     mensagens = [{"role": "system", "content": system}] + janela + [
         {"role": "user", "content": pedido}
     ]
+    inicio_vaivem = len(mensagens)  # tudo a partir daqui é vaivém de ferramentas desta troca (B1)
 
     resposta = None
     tentativas = []  # ver comentário abaixo — só usado se o limite for excedido
-    for _ in range(MAX_VOLTAS_FERRAMENTAS):
+    for i in range(MAX_VOLTAS_FERRAMENTAS):
+        # Degradação suave (11 Ago 2026) — antes, se o modelo ainda
+        # quisesse ferramentas na ÚLTIMA volta permitida, o ciclo
+        # acabava sem nunca lhe dar hipótese de responder, e caía
+        # sempre no "[ERRO] Excedi o limite" abaixo — mesmo quando já
+        # tinha lido 90% do que precisava. Não é mais chamadas (o
+        # número de voltas não mudou, continuam a ser
+        # MAX_VOLTAS_FERRAMENTAS no total): na última volta,
+        # simplesmente não se oferecem ferramentas — o modelo é
+        # obrigado a responder já com o que já leu, e um pedido curto
+        # (não gravado no histórico real, só usado nesta chamada) diz-
+        # lhe para admitir o que ficou por confirmar em vez de
+        # adivinhar. Resultado: quase nunca mais um erro seco, sempre
+        # uma resposta com alguma coisa aproveitável.
+        ultima_volta = i == MAX_VOLTAS_FERRAMENTAS - 1
+        mensagens_desta_chamada = mensagens
+        if ultima_volta:
+            mensagens_desta_chamada = mensagens + [{
+                "role": "user",
+                "content": (
+                    "[SUPERDEV interno] Esta é a tua última oportunidade "
+                    "nesta troca — não tens mais ferramentas disponíveis. "
+                    "Responde já com o que já sabes a partir do que leste "
+                    "acima. Se faltar algo para responder por completo, "
+                    "diz isso explicitamente em vez de adivinhar."
+                ),
+            }]
         mensagem, done_reason = ollama_chat(
-            mensagens, ferramentas=tools.TOOL_DEFS, memorias_usadas=memorias_usadas
+            mensagens_desta_chamada,
+            ferramentas=None if ultima_volta else tools.TOOL_DEFS,
+            memorias_usadas=memorias_usadas,
         )
 
         if not mensagem.get("tool_calls"):
             resposta = mensagem.get("content", "")
+            if ultima_volta and resposta:
+                resposta += (
+                    "\n\n[SUPERDEV: atingi o limite de voltas de "
+                    "ferramentas nesta troca — a resposta acima usa só o "
+                    "que já tinha confirmado até aqui, pode estar "
+                    "incompleta.]"
+                )
             if done_reason == "length":
                 # Aviso explícito em vez de corte silencioso — 10 Ago
                 # 2026, ver ollama_chat(). O utilizador via a resposta
@@ -416,8 +492,17 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
             else:
                 resultado = f"[ERRO] ferramenta desconhecida: {nome}"
             mensagens.append({"role": "tool", "content": resultado})
+        _comprimir_vaivem_se_necessario(mensagens, inicio_vaivem)
 
     if resposta is None:
+        # Praticamente inatingível desde a degradação suave acima (11
+        # Ago 2026) — a última volta já não oferece ferramentas, por
+        # isso `mensagem.get("tool_calls")` é sempre vazio nela e o
+        # ramo acima já terá definido `resposta`. Fica como rede de
+        # segurança final, não removido: se um dia a Ollama devolver
+        # algo inesperado nessa última chamada, ainda é melhor um erro
+        # com detalhe do que um crash sem explicação.
+        #
         # 9 Ago 2026 — antes só dizia "excedi o limite", sem detalhe
         # nenhum. Bug real encontrado ao vivo: como só o par
         # pergunta/resposta final entra em `historico` (o vaivém de

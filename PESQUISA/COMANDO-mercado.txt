@@ -1,0 +1,153 @@
+You are a research agent. You have NO prior context beyond this file. Read
+everything below before doing anything else, then execute the task.
+
+BACKGROUND — SUPERDEV, the project this research is for
+----------------------------------------------------------------------
+SUPERDEV is a hand-built local coding agent (Python, no framework):
+  - Model: qwen3.5:9b, served by Ollama on localhost, native "tools" API
+    (not the generic "format" JSON mode) — this is a thinking model with a
+    separate reasoning field.
+  - Hardware constraint that matters more than anything else in this
+    research: the GPU has 12GB VRAM and is SHARED with several other
+    local services running concurrently — this is NOT a dedicated
+    inference box. Any recommendation that assumes a free/dedicated GPU
+    is useless here.
+  - Memory: already solved — Postgres + pgvector, tenant-isolated
+    (pgmemory.py). Do not research memory/RAG systems, that part is done.
+  - Web search: already solved — local SearXNG container. Do not research
+    search providers.
+  - Real incidents already hit and fixed, for calibration (full detail in
+    /mnt/sovereign/superdev/HISTORICO.md if you want it, not required
+    reading):
+      * num_ctx=4096 caused Ollama to silently truncate the start of the
+        context mid-task when two file reads filled it — the agent kept
+        answering confidently with only what was left. Fixed by raising
+        num_ctx to 16384.
+      * The model entered repeat loops on long structured answers
+        (whole paragraphs repeated verbatim) until hitting the token cap
+        mid-word. Partially mitigated by raising repeat_penalty to 1.3.
+  - Config file with the full reasoning behind current tuning:
+    /mnt/sovereign/superdev/config.py (read the comments, they are
+    detailed and dated).
+
+THE ACTUAL QUESTION
+----------------------------------------------------------------------
+Before tuning SUPERDEV further by hand, we want to know: has this problem
+already been solved better by something that exists? Specifically, for a
+LOCAL, single-GPU, VRAM-constrained coding agent — how do other projects
+make it FAST (low latency) and TOKEN-LEAN (low context/prompt/output
+usage per turn)? Where a real answer already exists, we want to adopt or
+adapt it instead of re-deriving it by trial and error.
+
+IMPORTANT REFRAME — do not miss this: the goal is NOT to pick "the best
+model". SUPERDEV is meant to be the engine + tools around whatever model
+gets plugged in — the same project should work well whether the model
+behind it is a 1B model or a 120B model. Qwen3.5:9b is just what's
+plugged in today for testing. So do not spend effort ranking models
+against each other; instead, for every technique you find in topics 1-3,
+explicitly flag whether it is MODEL-AGNOSTIC (works regardless of which
+model/size is behind the engine) or MODEL-SPECIFIC (depends on a
+particular model's tool-calling format, parser, or quirks — e.g. how
+Ollama has a custom parser specifically for qwen3.5's tool syntax). We
+only want the model-agnostic techniques; flag model-specific ones as
+such and explain why they wouldn't generalize.
+
+RULES — do not violate these
+----------------------------------------------------------------------
+RULE 1 — EVIDENCE, NOT VIBES. Cite a URL for every factual claim
+(benchmark numbers, "X uses technique Y", "this cut tokens by Z%"). Where
+you cannot verify a claim, write UNVERIFIED next to it instead of
+dropping it silently or presenting it as fact.
+
+RULE 2 — REAL NUMBERS OVER MARKETING. Prefer measured benchmarks, GitHub
+issues/discussions with real user-reported numbers, and reproducible
+comparisons over vendor blog posts and marketing pages. If a claim only
+exists in marketing copy, say so explicitly.
+
+RULE 3 — RESPECT THE CONSTRAINTS. Every recommendation must be evaluated
+against: local-only inference, Ollama today (a runtime switch is
+allowed ONLY if you state the migration cost), a SHARED 12GB VRAM budget
+(today's test model is 9B, but the engine must not assume any particular
+model size — it should hold up conceptually for something as small as 1B
+or as large as 120B running elsewhere), and reliable tool-calling (many
+small local models fake tool calling badly — for any technique that
+depends on tool calling, say whether it needs NATIVE tool-calling support
+or degrades gracefully with prompt-based tool calling too).
+
+RULE 4 — STATE THE COST. For every "adopt this" or "adapt this"
+recommendation, say plainly what would have to change in the current
+code (the request/tool-call loop in agent.py, the tool schema in
+tools.py, the Ollama options in config.py) and give a rough effort
+estimate (small / medium / large — hours-ish, not a fake precise number).
+
+RULE 5 — "KEEP WHAT WE HAVE" IS A VALID ANSWER. If nothing you find beats
+the current hand-built approach for this specific constraint set, say so
+plainly and explain why, instead of padding the report with marginal
+ideas to look thorough.
+
+TASK — research these 6 topics, in order
+----------------------------------------------------------------------
+1. AGENT SCAFFOLDS built specifically for fast, local, token-lean coding
+   agents — not generic multi-agent orchestration frameworks (skip
+   CrewAI/AutoGen-style heavyweight orchestration unless one specifically
+   claims local-speed/token-efficiency wins with evidence). Look at
+   Aider, Continue.dev, Cline / Roo-Code, Qwen-Agent, smolagents,
+   llama.cpp's own agent/server tooling, and opencode itself (the tool
+   running this research — look at its own architecture/docs for how it
+   keeps calls fast and lean). For each: how does it concretely cut
+   tokens or latency, does it work with Ollama as-is or require a runtime
+   swap, how active/maintained is it (stars, last commit), license.
+
+2. TOKEN-REDUCTION TECHNIQUES with real measured evidence: diff/patch-
+   based file edits vs full-file rewrite; repo-map / symbol search
+   instead of dumping whole files into context; context/KV-cache reuse
+   across turns of the same conversation; system-prompt compression;
+   grammar-constrained tool calling (e.g. GBNF) to stop wasted/malformed
+   tool-call tokens. For each technique, find a real before/after number
+   if one exists.
+
+3. SPEED TECHNIQUES for local inference on a SHARED, VRAM-constrained
+   GPU specifically (not a dedicated inference server): quantization
+   trade-offs at ~9B scale (Q4_K_M vs Q5/Q6/Q8, AWQ/GPTQ), speculative
+   decoding with a small draft model, keep-alive/model-residency tuning
+   to avoid reload cost, and whether switching runtime (llama.cpp
+   directly, vLLM, TGI) would actually help a SINGLE concurrent user on
+   shared 12GB VRAM, or whether that benefit only shows up at higher
+   concurrency (state this clearly either way).
+
+4. MODEL-AGNOSTIC vs MODEL-SPECIFIC CHECK — NOT a "which model is best"
+   question (SUPERDEV must work with whatever model is plugged in, from
+   ~1B to ~120B, not just qwen3.5:9b). For each speed/token technique
+   found in topics 1-3, state explicitly whether it works regardless of
+   model family/size (e.g. diff-based edits, repo-map, KV-cache reuse —
+   likely agnostic) or whether it depends on a specific model's
+   tool-calling format/parser/quirks (e.g. Ollama's dedicated parser for
+   qwen3.5's tool syntax — likely NOT agnostic). Also check: does Ollama
+   (or another runtime) expose a genuinely model-agnostic tool-calling
+   interface the engine could rely on instead of coding against one
+   model's format, and does it degrade gracefully (still usable, just
+   less reliable) on a model with no native tool-calling at all?
+
+5. REAL-WORLD EVIDENCE — what do other builders of local coding agents
+   actually complain about regarding speed and token burn, and what did
+   they end up doing about it? Search GitHub issues/discussions,
+   r/LocalLLaMA, Hacker News. Same evidence discipline as Rule 1 — quote
+   or link real reports, don't paraphrase into vague claims.
+
+6. RECOMMENDATION MATRIX — one table: for each finding from 1-5, mark
+   ADOPT WHOLESALE / ADAPT THE TECHNIQUE INTO SUPERDEV / IGNORE, with the
+   effort estimate from Rule 4 and the one-line reason.
+
+OUTPUT
+----------------------------------------------------------------------
+Write to: /mnt/sovereign/superdev/PESQUISA/relatorio-mercado.md
+
+WRITE INCREMENTALLY. Create the file now, before researching, with the 6
+section headers empty. Fill in and save each section as you finish it,
+so a partial report is still useful if you run out of budget partway
+through. Do not hold everything in memory until the end.
+
+Write the report in Portuguese (PT-PT). Cite URLs inline. Where a claim
+is unverified, write "NÃO VERIFICADO" next to it rather than dropping it.
+Be blunt: "não encontrei nada que bata a abordagem actual" is a valid and
+useful conclusion for any of the 6 sections.

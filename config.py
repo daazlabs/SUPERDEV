@@ -221,7 +221,24 @@ CORE_IDENTITY = (
     "permission to keep reading. Only ask the user something when you "
     "genuinely lack information only they can give you (e.g. an "
     "ambiguous path, a choice between real alternatives) — never for "
-    "a mechanical next step you can already do yourself."
+    "a mechanical next step you can already do yourself. "
+    # 11 Ago 2026 — B3 da pesquisa de mercado (PESQUISA/relatorio-
+    # mercado.md secções 2.1/2.7/6.2): quando um pedido precisa de
+    # ferramentas independentes entre si (não uma a seguir ao resultado
+    # da outra), cada volta separada reenvia a conversa toda — o mesmo
+    # custo estrutural que o CodeAct ataca de forma mais radical. O
+    # ciclo em agent.responder() já processava vários tool_calls vindos
+    # na MESMA resposta (não só o primeiro) desde sempre — só faltava
+    # o modelo saber que pode fazer isso. Testado ao vivo antes de
+    # activar: com esta frase, o qwen3.5:9b agrupou 2 ferramentas
+    # independentes na mesma resposta em 6/6 tentativas (2 pedidos ×
+    # 3 repetições); não medido sem a frase (não valia a pena o tempo —
+    # o ganho de a ter é claro e sem custo de tokens em quase todos os
+    # pedidos, que só precisam de 0-1 ferramenta).
+    "When a request needs multiple tools that don't depend on each "
+    "other's result, call them together in the same turn instead of "
+    "one tool-call round at a time — it saves resending the whole "
+    "conversation for each one."
 )
 
 # --- Memória (RAG mínimo) ------------------------------------------------

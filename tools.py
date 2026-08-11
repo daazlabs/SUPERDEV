@@ -54,7 +54,18 @@ chave de API nenhuma, sem enviar nada para fora desta máquina (o
 SearXNG é que fala com os motores de busca reais). Mesmo espírito das
 outras: falha de forma clara se o SearXNG estiver em baixo, nunca
 inventa um resultado.
+
+Ferramenta 7, listar_simbolos (11 Ago 2026) — "contexto selectivo"
+(recomendação B2 da pesquisa de mercado, ver PESQUISA/relatorio-
+mercado.md secção 2.4/6.2): um mapa de classes/funções/assinaturas de
+um ficheiro ou pasta .py, sem o corpo das funções — para o modelo
+poder decidir "o que há aqui" sem gastar o ler_ficheiro inteiro
+quando só precisa de uma visão geral. Usa só `ast` (biblioteca
+padrão, sem dependência nova). Limitação deliberada: só Python — o
+projecto é só Python, e um mapa genérico multi-linguagem seria muito
+mais caro de construir para um ganho que não existe aqui.
 """
+import ast
 import fnmatch
 import json
 import os
@@ -96,6 +107,13 @@ LIMITE_CARACTERES_LOTE = 30000
 # decidir se vale a pena e não enche o prompt com ruído.
 LIMITE_RESULTADOS_WEB = 5
 PESQUISA_WEB_TIMEOUT_S = 8
+
+# listar_simbolos — mesma filosofia: nº de ficheiros mapeados de uma
+# vez tem tecto (não vale a pena mapear um repo inteiro de propósito),
+# e o mapa somado também, reaproveitando LIMITE_CARACTERES_LOTE (é o
+# mesmo tipo de tecto — texto agregado de vários ficheiros numa só
+# chamada — não vale a pena um terceiro nome para o mesmo conceito).
+LIMITE_FICHEIROS_SIMBOLOS = 30
 
 
 def ler_ficheiro(caminho: str, inicio: int = 0) -> str:
@@ -335,6 +353,107 @@ def pesquisar_web(query: str) -> str:
     return "\n".join(partes)
 
 
+def _assinatura(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+    """Reconstrói "a, b=1, *args, c, **kwargs" a partir do nó AST de
+    uma função — sem correr o código, só a árvore sintáctica."""
+    args = node.args
+    partes = []
+    n_pos = len(args.args)
+    n_defaults = len(args.defaults)
+    for i, a in enumerate(args.args):
+        s = a.arg
+        idx_default = i - (n_pos - n_defaults)
+        if idx_default >= 0:
+            s += f"={ast.unparse(args.defaults[idx_default])}"
+        partes.append(s)
+    if args.vararg:
+        partes.append(f"*{args.vararg.arg}")
+    elif args.kwonlyargs:
+        partes.append("*")
+    for kw, default in zip(args.kwonlyargs, args.kw_defaults):
+        s = kw.arg
+        if default is not None:
+            s += f"={ast.unparse(default)}"
+        partes.append(s)
+    if args.kwarg:
+        partes.append(f"**{args.kwarg.arg}")
+    return ", ".join(partes)
+
+
+def _primeira_linha_docstring(node) -> str:
+    doc = ast.get_docstring(node)
+    return doc.strip().splitlines()[0] if doc else ""
+
+
+def listar_simbolos(caminho: str) -> str:
+    """Mapa de classes/funções de um ficheiro .py ou pasta (recursivo)
+    — nome, assinatura e 1ª linha da docstring de cada uma, sem o
+    corpo. "Contexto selectivo": para o modelo perceber o que um
+    ficheiro/módulo contém sem pagar o custo de ler_ficheiro inteiro
+    quando só precisa de uma visão geral (ex.: "o que há em tools.py"
+    antes de decidir se vale a pena ler uma função específica). Falha
+    de forma clara por ficheiro (sintaxe inválida não pára os
+    restantes) — nunca inventa uma assinatura."""
+    caminho = os.path.abspath(os.path.expanduser(caminho))
+    if not os.path.exists(caminho):
+        return f"[ERRO] Caminho não encontrado: {caminho}"
+
+    if os.path.isfile(caminho):
+        ficheiros = [caminho]
+    else:
+        ficheiros = []
+        for raiz, pastas, nomes in os.walk(caminho):
+            pastas[:] = [p for p in pastas if p not in (
+                ".git", "__pycache__", "node_modules", ".venv", "venv"
+            )]
+            ficheiros.extend(
+                os.path.join(raiz, nome) for nome in nomes if nome.endswith(".py")
+            )
+            if len(ficheiros) >= LIMITE_FICHEIROS_SIMBOLOS:
+                break
+        ficheiros = ficheiros[:LIMITE_FICHEIROS_SIMBOLOS]
+
+    if not ficheiros:
+        return f"[SEM RESULTADOS] Nenhum ficheiro .py encontrado em {caminho}"
+
+    blocos = []
+    for f in ficheiros:
+        try:
+            with open(f, "r", errors="replace") as fh:
+                arvore = ast.parse(fh.read(), filename=f)
+        except SyntaxError as e:
+            blocos.append(f"{f}:\n  [ERRO] não é Python válido: {e}")
+            continue
+        except Exception as e:
+            blocos.append(f"{f}:\n  [ERRO] não foi possível ler/analisar: {e}")
+            continue
+
+        linhas = []
+        for node in arvore.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                sufixo = _primeira_linha_docstring(node)
+                linhas.append(
+                    f"  def {node.name}({_assinatura(node)})"
+                    + (f" — {sufixo}" if sufixo else "")
+                )
+            elif isinstance(node, ast.ClassDef):
+                sufixo = _primeira_linha_docstring(node)
+                linhas.append(f"  class {node.name}:" + (f" — {sufixo}" if sufixo else ""))
+                for sub in node.body:
+                    if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        subsufixo = _primeira_linha_docstring(sub)
+                        linhas.append(
+                            f"    def {sub.name}({_assinatura(sub)})"
+                            + (f" — {subsufixo}" if subsufixo else "")
+                        )
+        blocos.append(f"{f}:\n" + ("\n".join(linhas) if linhas else "  (sem classes/funções de topo)"))
+
+    resultado = "\n\n".join(blocos)
+    if len(resultado) > LIMITE_CARACTERES_LOTE:
+        resultado = resultado[:LIMITE_CARACTERES_LOTE] + "\n...[cortado — mapa maior que o limite]"
+    return resultado
+
+
 # Definições no formato nativo da Ollama (compatível com a convenção
 # OpenAI de function-calling) — é isto que vai no campo "tools" do
 # pedido à API.
@@ -497,6 +616,33 @@ TOOL_DEFS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "listar_simbolos",
+            "description": (
+                "Returns a lightweight map of a Python file (or folder, "
+                "recursive) — class/function names, signatures, and the "
+                "first line of each docstring, WITHOUT the function "
+                "bodies. Prefer this over ler_ficheiro when you just "
+                "need to know what a file/module contains (what "
+                "functions/classes it has, what arguments they take) "
+                "before deciding whether to read it in full. Python "
+                "files only (.py) — for other file types use "
+                "ler_ficheiro or procurar_texto instead."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "caminho": {
+                        "type": "string",
+                        "description": "Absolute path of the .py file or folder to map",
+                    },
+                },
+                "required": ["caminho"],
+            },
+        },
+    },
 ]
 
 # Mapa nome -> função real, para executar o que o modelo pedir.
@@ -507,4 +653,5 @@ FUNCOES = {
     "correr_ruff": correr_ruff,
     "ler_varios_ficheiros": ler_varios_ficheiros,
     "pesquisar_web": pesquisar_web,
+    "listar_simbolos": listar_simbolos,
 }

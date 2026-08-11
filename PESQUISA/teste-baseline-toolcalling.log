@@ -1,0 +1,42 @@
+[ler_ficheiro 1/5] CORRECTO (40.4s) — args: {'caminho': '/mnt/sovereign/superdev/config.py'}
+[ler_ficheiro 2/5] CORRECTO (15.1s) — args: {'caminho': '/mnt/sovereign/superdev/config.py'}
+[ler_ficheiro 3/5] CORRECTO (14.9s) — args: {'caminho': '/mnt/sovereign/superdev/config.py'}
+[ler_ficheiro 4/5] CORRECTO (15.1s) — args: {'caminho': '/mnt/sovereign/superdev/config.py'}
+[ler_ficheiro 5/5] CORRECTO (15.0s) — args: {'caminho': '/mnt/sovereign/superdev/config.py'}
+[listar_ficheiros 1/5] CORRECTO (14.5s) — args: {'caminho': '/mnt/sovereign/superdev/'}
+[listar_ficheiros 2/5] CORRECTO (14.4s) — args: {'caminho': '/mnt/sovereign/superdev/'}
+[listar_ficheiros 3/5] CORRECTO (14.8s) — args: {'caminho': '/mnt/sovereign/superdev/'}
+[listar_ficheiros 4/5] CORRECTO (15.1s) — args: {'caminho': '/mnt/sovereign/superdev/'}
+[listar_ficheiros 5/5] CORRECTO (15.2s) — args: {'caminho': '/mnt/sovereign/superdev/'}
+[procurar_texto 1/5] CORRECTO (21.0s) — args: {'caminho': '/mnt/sovereign/superdev/config.py', 'termo': 'OLLAMA_HOST'}
+[procurar_texto 2/5] CORRECTO (20.6s) — args: {'caminho': '/mnt/sovereign/superdev/config.py', 'termo': 'OLLAMA_HOST'}
+[procurar_texto 3/5] CORRECTO (20.3s) — args: {'caminho': '/mnt/sovereign/superdev/config.py', 'termo': 'OLLAMA_HOST'}
+[procurar_texto 4/5] CORRECTO (20.5s) — args: {'caminho': '/mnt/sovereign/superdev/config.py', 'termo': 'OLLAMA_HOST'}
+[procurar_texto 5/5] CORRECTO (20.4s) — args: {'caminho': '/mnt/sovereign/superdev/config.py', 'termo': 'OLLAMA_HOST'}
+[correr_ruff 1/5] CORRECTO (14.9s) — args: {'codigo': 'def soma(a, b):\n    return a+b'}
+[correr_ruff 2/5] CORRECTO (15.0s) — args: {'codigo': 'def soma(a, b):\n    return a+b'}
+[correr_ruff 3/5] CORRECTO (15.0s) — args: {'codigo': 'def soma(a, b):\n    return a+b'}
+[correr_ruff 4/5] CORRECTO (14.7s) — args: {'codigo': 'def soma(a, b):\n    return a+b'}
+[correr_ruff 5/5] CORRECTO (14.9s) — args: {'codigo': 'def soma(a, b):\n    return a+b'}
+[ler_varios_ficheiros 1/5] CORRECTO (21.0s) — args: {'caminhos': ['/mnt/sovereign/superdev/config.py', '/mnt/sovereign/superdev/agent.py']}
+[ler_varios_ficheiros 2/5] CORRECTO (21.0s) — args: {'caminhos': ['/mnt/sovereign/superdev/config.py', '/mnt/sovereign/superdev/agent.py']}
+[ler_varios_ficheiros 3/5] CORRECTO (20.9s) — args: {'caminhos': ['/mnt/sovereign/superdev/config.py', '/mnt/sovereign/superdev/agent.py']}
+[ler_varios_ficheiros 4/5] CORRECTO (20.2s) — args: {'caminhos': ['/mnt/sovereign/superdev/config.py', '/mnt/sovereign/superdev/agent.py']}
+[ler_varios_ficheiros 5/5] CORRECTO (20.0s) — args: {'caminhos': ['/mnt/sovereign/superdev/config.py', '/mnt/sovereign/superdev/agent.py']}
+[pesquisar_web 1/5] CORRECTO (14.5s) — args: {'query': 'últimas notícias sobre o modelo Qwen 3.5'}
+[pesquisar_web 2/5] CORRECTO (14.0s) — args: {'query': 'últimas notícias sobre o modelo Qwen 3.5'}
+[pesquisar_web 3/5] CORRECTO (14.2s) — args: {'query': 'últimas notícias sobre o modelo Qwen 3.5'}
+[pesquisar_web 4/5] CORRECTO (14.6s) — args: {'query': 'últimas notícias sobre o modelo Qwen 3.5'}
+[pesquisar_web 5/5] CORRECTO (16.3s) — args: {'query': 'últimas notícias sobre o modelo Qwen 3.5'}
+[controlo_negativo_1 1/5] CORRECTO (4.4s) — não chamou nenhuma ferramenta, como esperado
+[controlo_negativo_1 2/5] CORRECTO (4.0s) — não chamou nenhuma ferramenta, como esperado
+[controlo_negativo_1 3/5] CORRECTO (4.3s) — não chamou nenhuma ferramenta, como esperado
+[controlo_negativo_1 4/5] CORRECTO (4.2s) — não chamou nenhuma ferramenta, como esperado
+[controlo_negativo_1 5/5] CORRECTO (3.9s) — não chamou nenhuma ferramenta, como esperado
+[controlo_negativo_2 1/5] CORRECTO (20.2s) — não chamou nenhuma ferramenta, como esperado
+[controlo_negativo_2 2/5] CORRECTO (18.9s) — não chamou nenhuma ferramenta, como esperado
+[controlo_negativo_2 3/5] CORRECTO (23.6s) — não chamou nenhuma ferramenta, como esperado
+[controlo_negativo_2 4/5] CORRECTO (19.7s) — não chamou nenhuma ferramenta, como esperado
+[controlo_negativo_2 5/5] CORRECTO (21.9s) — não chamou nenhuma ferramenta, como esperado
+
+Relatório escrito em /mnt/sovereign/superdev/PESQUISA/baseline-schema-correct.md
