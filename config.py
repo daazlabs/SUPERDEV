@@ -347,13 +347,18 @@ MEMORIA_CURTO_PRAZO_TROCAS = 4
 MEMORIA_DESTILAR_A_CADA_TROCAS = 6
 
 # --- Memória via pgvector (motor "produto", multi-tenant, 9 Ago 2026) ---
-# Threshold PRÓPRIO, não o MEMORY_MIN_SCORE acima — a escala do score
-# combinado aqui é diferente (o ts_rank nativo do Postgres não é 0-1
-# como a sobreposição de palavras calculada à mão no memory.py
-# original). Calibrado com dados reais (ver HISTORICO.md): perguntas
-# claramente irrelevantes (ex: "como se faz uma omolete?") pontuaram
-# 0.40-0.43; factos realmente relevantes pontuaram 0.47-0.60. 0.45
-# fica na margem entre os dois grupos. Valor de arranque, mesma
-# filosofia do MEMORY_MIN_SCORE (preferir não trazer nada a trazer
-# ruído) — por afinar com mais casos reais.
-PG_MEMORY_MIN_SCORE = 0.45
+# SUBIDO 11 Ago 2026, de 0.45 para 0.50 — a calibração de 9 Ago (9
+# casos) não aguentou um teste maior: "como se faz uma omolete?"
+# pontuou 0.455 (acima do 0.45!) e "explica-me o que é uma API REST"
+# 0.486 — as duas traziam memórias irrelevantes com confiança. Achado
+# à parte: a componente de palavras-chave (MEMORY_PESO_PALAVRAS) deu
+# 0.0000 em todos os casos testados — o score está, na prática, a ser
+# só semelhança semântica pura, que não separa bem tópicos com só 5
+# factos na base. Testado 0.55 primeiro: corrigia os falsos positivos
+# mas passava a perder verdadeiros positivos que 0.45 tinha certos
+# (DaazNexus, ASSIST). 0.50 ficou o meio-termo real, medido: 0 falsos
+# positivos nos 3 testados, 2/5 verdadeiros positivos (DaazLeads,
+# DaazNexus), 3/5 ainda por trazer (VRAM, preferência, ASSIST — só o
+# ASSIST piorou face ao 0.45). Não é calibração definitiva, é a troca
+# mais segura possível com só 5 factos reais — revisitar com mais uso.
+PG_MEMORY_MIN_SCORE = 0.50
