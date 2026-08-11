@@ -66,13 +66,20 @@ projecto é só Python, e um mapa genérico multi-linguagem seria muito
 mais caro de construir para um ganho que não existe aqui.
 
 SANDBOX DE CAMINHOS (11 Ago 2026) — toda a ferramenta que toca no
-disco valida o caminho contra config.RAIZ_PERMITIDA antes de o abrir
-(ver _validar_caminho abaixo e a nota em config.py para o porquê).
-Testado primeiro no protótipo `/mnt/sovereign/superdevsandbox/`
-(sandbox do CodeAct) — o mesmo padrão trazido para aqui depois de
-confirmado a funcionar lá.
+disco valida o caminho contra config.RAIZES_PERMITIDAS antes de o
+abrir (ver _validar_caminho abaixo e a nota em config.py para o
+porquê). Testado primeiro no protótipo
+`/mnt/sovereign/superdevsandbox/` (sandbox do CodeAct) — o mesmo
+padrão trazido para aqui depois de confirmado a funcionar lá.
+Alargado no mesmo dia de "só a pasta do SUPERDEV" para uma lista de
+pastas de trabalho reais (decisão explícita do utilizador, editável
+só em config.py, nunca por chat) + uma 2ª camada: nomes de ficheiro
+sensíveis (.env, chaves SSH, etc.) nunca são lidos mesmo dentro de
+uma pasta permitida — ler não escreve nada no disco, mas um segredo
+lido pode ser reaproveitado sem querer mais tarde.
 """
 import ast
+import fnmatch
 import json
 import os
 import subprocess
@@ -85,18 +92,30 @@ import config
 
 
 def _validar_caminho(caminho: str) -> str | None:
-    """Devolve o caminho absoluto se estiver dentro de
-    config.RAIZ_PERMITIDA, ou None se estiver fora (incluindo
-    tentativas de fuga com `..`) — chamado no início de toda função
-    que toca no disco, antes de qualquer os.path.isfile/isdir/walk.
-    Mesma função, quase carácter a carácter, do protótipo
-    superdevsandbox/ferramentas.py — lá foi testado com tentativas de
-    fuga a sério (../.. e caminho absoluto, ambos bloqueados)."""
+    """Devolve o caminho absoluto se estiver dentro de alguma das
+    config.RAIZES_PERMITIDAS, ou None se estiver fora de todas
+    (incluindo tentativas de fuga com `..`) — chamado no início de
+    toda função que toca no disco, antes de qualquer
+    os.path.isfile/isdir/walk. Mesmo princípio do protótipo
+    superdevsandbox/ferramentas.py (lá testado com tentativas de fuga
+    a sério), agora com várias raízes em vez de uma só."""
     absoluto = os.path.abspath(os.path.expanduser(caminho))
-    raiz = os.path.abspath(config.RAIZ_PERMITIDA)
-    if absoluto != raiz and not absoluto.startswith(raiz + os.sep):
-        return None
-    return absoluto
+    for raiz_bruta in config.RAIZES_PERMITIDAS:
+        raiz = os.path.abspath(raiz_bruta)
+        if absoluto == raiz or absoluto.startswith(raiz + os.sep):
+            return absoluto
+    return None
+
+
+def _nome_sensivel(caminho: str) -> bool:
+    """True se o NOME do ficheiro bate com um padrão sensível
+    (config.PADROES_FICHEIRO_SENSIVEL) — independente de qual raiz
+    permitida está por baixo. Chamado só pelas ferramentas que leem
+    CONTEÚDO (ler_ficheiro, procurar_texto), não por listar_ficheiros
+    — ver o nome de um ficheiro numa listagem não expõe o segredo
+    dele, só o conteúdo expõe."""
+    nome = os.path.basename(caminho)
+    return any(fnmatch.fnmatch(nome, padrao) for padrao in config.PADROES_FICHEIRO_SENSIVEL)
 
 
 # Limite simples para não rebentar a janela de contexto com um
@@ -152,7 +171,9 @@ def ler_ficheiro(caminho: str, inicio: int = 0) -> str:
     `inicio` usar a seguir, para o ciclo poder mesmo avançar."""
     caminho = _validar_caminho(caminho)
     if caminho is None:
-        return "[ERRO] Caminho fora da pasta permitida do projecto."
+        return "[ERRO] Caminho fora das pastas permitidas."
+    if _nome_sensivel(caminho):
+        return "[ERRO] Ficheiro de credenciais/chaves — nunca lido, mesmo dentro de uma pasta permitida."
     if not os.path.isfile(caminho):
         return f"[ERRO] Ficheiro não encontrado: {caminho}"
     try:
@@ -186,7 +207,7 @@ def listar_ficheiros(caminho: str) -> str:
     clara se a pasta não existir ou não for uma pasta."""
     caminho = _validar_caminho(caminho)
     if caminho is None:
-        return "[ERRO] Caminho fora da pasta permitida do projecto."
+        return "[ERRO] Caminho fora das pastas permitidas."
     if not os.path.isdir(caminho):
         return f"[ERRO] Pasta não encontrada: {caminho}"
     try:
@@ -216,11 +237,13 @@ def procurar_texto(caminho: str, termo: str) -> str:
     caminho não existir."""
     caminho = _validar_caminho(caminho)
     if caminho is None:
-        return "[ERRO] Caminho fora da pasta permitida do projecto."
+        return "[ERRO] Caminho fora das pastas permitidas."
     if not os.path.exists(caminho):
         return f"[ERRO] Caminho não encontrado: {caminho}"
 
     if os.path.isfile(caminho):
+        if _nome_sensivel(caminho):
+            return "[ERRO] Ficheiro de credenciais/chaves — nunca lido, mesmo dentro de uma pasta permitida."
         ficheiros = [caminho]
     else:
         ficheiros = []
@@ -230,7 +253,12 @@ def procurar_texto(caminho: str, termo: str) -> str:
             pastas[:] = [p for p in pastas if p not in (
                 ".git", "__pycache__", "node_modules", ".venv", "venv"
             )]
+            # ficheiros sensíveis (.env, chaves SSH...) ignorados em
+            # silêncio, mesmo espírito das pastas de lixo acima — uma
+            # pesquisa recursiva não deve nunca ler o conteúdo deles
             for nome in nomes:
+                if _nome_sensivel(nome):
+                    continue
                 ficheiros.append(os.path.join(raiz, nome))
                 if len(ficheiros) >= LIMITE_FICHEIROS_PROCURADOS:
                     break
@@ -424,7 +452,7 @@ def listar_simbolos(caminho: str) -> str:
     restantes) — nunca inventa uma assinatura."""
     caminho = _validar_caminho(caminho)
     if caminho is None:
-        return "[ERRO] Caminho fora da pasta permitida do projecto."
+        return "[ERRO] Caminho fora das pastas permitidas."
     if not os.path.exists(caminho):
         return f"[ERRO] Caminho não encontrado: {caminho}"
 

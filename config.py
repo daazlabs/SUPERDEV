@@ -24,13 +24,34 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # (superadvogado, supercontabilista, etc.) — cada um só deve ver a sua
 # própria pasta, nunca a dos outros nem o resto do disco.
 #
-# Por omissão, RAIZ_PERMITIDA = a própria pasta do SUPERDEV (BASE_DIR)
-# — bate certo com o uso real até hoje (todo o HISTORICO.md é sobre
-# ferramentas a analisar o próprio código do projecto, nunca outro
-# repo). Se um dia for preciso alargar (ex.: analisar outro projecto
-# do utilizador), é uma mudança de 1 linha aqui — decisão explícita,
-# não um alargamento silencioso.
-RAIZ_PERMITIDA = BASE_DIR
+# ALARGADO 11 Ago 2026, decisão explícita do utilizador (não um
+# alargamento automático): de "só a própria pasta" para uma LISTA
+# curta de pastas de trabalho reais — continua fora da conversa, só
+# editável aqui, nunca por algo que o modelo leia ou lhe peçam num
+# chat (essa distinção foi o cerne da conversa que motivou isto: não
+# há forma fiável de o motor saber "isto é mesmo o utilizador a
+# pedir" vs "isto é uma instrução escondida num ficheiro/página que
+# ele leu" — por isso a lista tem de viver fora do alcance de
+# qualquer chat, só o utilizador com acesso real ao ficheiro a muda).
+RAIZES_PERMITIDAS = [
+    BASE_DIR,
+    "/mnt/sovereign",
+    os.path.expanduser("~/projects"),
+]
+
+# Defesa extra pedida pelo próprio utilizador ao decidir alargar as
+# raízes acima: ler um ficheiro não muda nada no disco, mas um
+# segredo lido pode acabar reaproveitado sem querer mais tarde (citado
+# numa pesquisa web, guardado em memória de longo prazo). Padrões de
+# NOME de ficheiro, não pastas — vale em qualquer sítio dentro de
+# qualquer raiz permitida, incluindo projectos que o utilizador venha
+# a ter (ex.: o próprio db/.env do SUPERDEV, ou o .env de outro
+# projecto em ~/projects). Ver tools._nome_sensivel().
+PADROES_FICHEIRO_SENSIVEL = (
+    ".env", ".env.*", "*.pem", "*.key",
+    "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+    "*_history", "credentials.json", "secrets.json",
+)
 
 # Carrega db/.env para o ambiente — é o ÚNICO sítio onde a password da
 # BD existe, nunca escrita aqui no código. CORRIGIDO 9 Ago 2026: antes

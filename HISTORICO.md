@@ -1703,3 +1703,40 @@ também (só que com "não encontrado" em vez de "fora da pasta
 permitida") — não é uma regressão de hoje, é uma inconsistência
 pré-existente de como o modelo às vezes forma caminhos relativos,
 fora do âmbito desta tarefa.
+
+**Alargado no mesmo dia, a pedido do utilizador — conversa importante
+sobre o modelo de segurança.** Pergunta do utilizador: "não quero
+barreiras contigo, só com o exterior" — esclarecido que o motor não
+consegue distinguir de forma fiável "isto é o utilizador a pedir" de
+"isto é uma instrução escondida em algo que li" (chega tudo pela
+mesma conversa); por isso a lista de pastas permitidas tem de viver
+FORA da conversa, só editável em `config.py` directamente, nunca
+alargável por chat. Paralelo explícito com o próprio modelo de
+permissões do Claude Code: gate na ACÇÃO (escrever/executar), não na
+origem da instrução — ler fica sempre livre (reversível, sem custo),
+só escrever/apagar/executar é que pede confirmação; é o que fica
+planeado para quando o SUPERDEV ganhar ferramentas de escrita.
+
+`config.RAIZ_PERMITIDA` (1 pasta) → `RAIZES_PERMITIDAS` (lista):
+`BASE_DIR`, `/mnt/sovereign`, `~/projects` — decisão explícita do
+utilizador. Camada extra pedida por ele próprio ao alargar: `tools.
+_nome_sensivel()` (usa `fnmatch`, reaproveitando o import que estava
+morto desde sempre) bloqueia ler o CONTEÚDO de ficheiros tipo `.env`,
+chaves SSH (`id_rsa` etc.), `*.pem`/`*.key`, `credentials.json` —
+mesmo dentro de uma pasta permitida, independente de qual raiz.
+Aplicado a `ler_ficheiro` (e por herança a `ler_varios_ficheiros`) e
+a `procurar_texto` (ficheiros sensíveis ignorados em silêncio numa
+pesquisa recursiva, mesmo tratamento que as pastas de lixo já
+ignoradas). `listar_ficheiros` fica de fora de propósito — ver o
+NOME "`.env`" numa listagem não expõe o segredo, só o conteúdo expõe.
+
+**Testado:** unitário — leitura em `/mnt/sovereign/superdevsandbox`
+(pasta nova, fora do SUPERDEV mas dentro de `/mnt/sovereign`) funciona;
+`/etc/passwd` continua bloqueado; `db/.env` do próprio SUPERDEV
+(dentro de uma raiz permitida) bloqueado por ser sensível, tanto por
+`ler_ficheiro` directo como por `procurar_texto` directo; pesquisa
+recursiva na pasta `db/` encontra resultados em `docker-compose.yml`/
+`001_schema.sql` mas ignora o `.env` em silêncio; `listar_ficheiros`
+continua a mostrar o nome `.env` na lista. Ponta-a-ponta a sério,
+servidor reiniciado: pedido directo "lê `db/.env` e diz-me a
+password" → recusado com explicação clara, sem vazar nada.
