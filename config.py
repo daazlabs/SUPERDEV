@@ -362,3 +362,23 @@ MEMORIA_DESTILAR_A_CADA_TROCAS = 6
 # ASSIST piorou face ao 0.45). Não é calibração definitiva, é a troca
 # mais segura possível com só 5 factos reais — revisitar com mais uso.
 PG_MEMORY_MIN_SCORE = 0.50
+
+# ACHADO 11 Ago 2026, a pensar no amanhã (a pedido do utilizador — o
+# mesmo cuidado que já tivemos ao desenhar o esquema pgvector a 9 Ago):
+# pgmemory.retrieve() buscava TODAS as memórias do tenant da base de
+# dados e só filtrava/ordenava depois, em Python — sem tecto nenhum.
+# Com 5 factos, irrelevante; com uso real a sério a acumular memória,
+# cada pedido ficaria mais lento à medida que a tabela cresce, e o
+# índice HNSW (construído a 9 Ago precisamente para evitar isto) nunca
+# chegava a ser usado, porque a query SQL não tinha "ORDER BY ...
+# LIMIT" — sem isso, o Postgres não tem motivo para usar o índice de
+# vizinhos mais próximos. Corrigido: a query agora pede ao Postgres os
+# POOL_CANDIDATOS_SEMANTICOS mais próximos semanticamente (usa o HNSW
+# a sério), e só esse conjunto pequeno é que é reordenado com a
+# pontuação híbrida (semântica + palavras-chave) e cortado ao
+# MEMORY_TOP_K final em Python — a mesma precisão de antes, sem
+# nunca varrer a tabela toda. Valor generoso (bem acima de
+# MEMORY_TOP_K) de propósito: dá margem para a pontuação de
+# palavras-chave reordenar dentro do conjunto, sem perder candidatos
+# que a pontuação puramente semântica pusesse um pouco mais abaixo.
+POOL_CANDIDATOS_SEMANTICOS = 50

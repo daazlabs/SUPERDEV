@@ -63,7 +63,12 @@ def retrieve(query: str, tenant_id: str = None, categoria: str = None, k: int = 
     """Devolve as k memórias mais relevantes PARA ESTE tenant (nunca
     mistura clientes), ordenadas por pontuação híbrida. Cada item:
     (score, id, texto) — mesma forma de memory.retrieve(), trocável.
-    """
+
+    CORRIGIDO 11 Ago 2026 — a pensar no amanhã, ver a nota em
+    config.POOL_CANDIDATOS_SEMANTICOS para o porquê: a query já pede
+    só os N mais próximos semanticamente (ORDER BY ... LIMIT, é isto
+    que deixa o Postgres usar o índice HNSW a sério), em vez de trazer
+    a tabela toda do tenant para reordenar tudo em Python."""
     k = k or config.MEMORY_TOP_K
     tenant_id = tenant_id or config.TENANT_PADRAO
     q_vec = _vec_literal(memory._embed(query))
@@ -75,10 +80,14 @@ def retrieve(query: str, tenant_id: str = None, categoria: str = None, k: int = 
         FROM memorias
         WHERE tenant_id = %(tenant_id)s
     """
-    params = {"qvec": q_vec, "query": query, "tenant_id": tenant_id}
+    params = {
+        "qvec": q_vec, "query": query, "tenant_id": tenant_id,
+        "pool": config.POOL_CANDIDATOS_SEMANTICOS,
+    }
     if categoria:
         sql += " AND categoria = %(categoria)s"
         params["categoria"] = categoria
+    sql += " ORDER BY embedding <=> %(qvec)s::vector LIMIT %(pool)s"
 
     with _pool.connection() as conn:
         with conn.cursor() as cur:
