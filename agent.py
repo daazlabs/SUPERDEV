@@ -276,6 +276,88 @@ def _verificar_grounding(resposta: str, mensagens: list) -> str:
     return resposta + aviso
 
 
+# Nível "1.5" do anti-confabulação (13 Ago 2026, ver HISTORICO.md) —
+# incidente real motivador: um pedido de pesquisa (DAAZPRIME) recebeu
+# uma resposta a citar "Google AI Overview"/"ChatGPT"/fóruns com ar de
+# facto confirmado, com um URL incluído — e nunca, em nenhuma das 5
+# voltas, chamou pesquisar_web. Fundamento ZERO, não uma distorção
+# subtil do que foi pesquisado (isso continua por apanhar — seria o
+# Nível 2, uma verificação semântica a sério, que dobra o custo por
+# exigir uma 2ª chamada ao modelo, e por isso continua adiado; ver
+# HISTORICO.md).
+#
+# Mais estreito de propósito, mesmo espírito do Nível 1 acima: não
+# confirma SE o que foi dito bate certo com o que a ferramenta
+# devolveu (isso é o Nível 2) — só confirma que a categoria de
+# ferramenta que a resposta implica ter usado foi mesmo chamada
+# nesta troca. Apanha "fingiu que pesquisou"; não apanha "pesquisou
+# mas exagerou". Custo ~0 — reaproveita o mesmo mecanismo por
+# palavras-chave do filtro de TOOL_DEFS (tools.PALAVRAS_CHAVE_
+# FERRAMENTAS), só ao contrário: em vez de perguntar ao PEDIDO
+# "precisas de ferramenta?", pergunta à RESPOSTA "falas de algo que só
+# uma ferramenta confirma — e essa ferramenta foi mesmo chamada?"
+#
+# Categorias deliberadamente poucas e concretas — começa só com "web"
+# (o caso real) e "ficheiro" (o mais óbvio a seguir), ampliar se
+# aparecer um 3º padrão real, mesma disciplina do Nível 1 (começou só
+# com 1 padrão, cresceu com incidentes a sério, não especulação).
+_CATEGORIAS_FUNDAMENTO = {
+    "web": {
+        "palavras_chave": (
+            "google ai overview", "google ai", "chatgpt", "gemini",
+            "perplexity", "pesquisei na web", "pesquisa na web encontrou",
+            "segundo a pesquisa", "resultados da pesquisa", "notícia recente",
+            "notícias recentes", "fórum", "forum", "reddit",
+            "de acordo com o site", "site oficial",
+        ),
+        "ferramentas": ("pesquisar_web",),
+    },
+    "ficheiro": {
+        "palavras_chave": (
+            "li o ficheiro", "o ficheiro contém", "de acordo com o código",
+            "no código-fonte",
+        ),
+        "ferramentas": (
+            "ler_ficheiro", "ler_varios_ficheiros", "procurar_texto", "listar_simbolos",
+        ),
+    },
+}
+
+
+def _verificar_fundamento_categorias(resposta: str, mensagens: list) -> str:
+    """Para cada categoria em _CATEGORIAS_FUNDAMENTO, se a resposta usa
+    linguagem típica dessa categoria mas nenhuma das ferramentas
+    correspondentes foi chamada nesta troca, sinaliza — sem corrigir
+    nem bloquear, mesmo princípio do Nível 1: tornar a suspeita
+    visível, não decidir por ninguém."""
+    resposta_min = resposta.lower()
+    ferramentas_chamadas = {
+        tc["function"]["name"]
+        for m in mensagens
+        if m.get("role") == "assistant"
+        for tc in (m.get("tool_calls") or [])
+    }
+
+    suspeitas = []
+    for categoria, regras in _CATEGORIAS_FUNDAMENTO.items():
+        tem_linguagem_da_categoria = any(p in resposta_min for p in regras["palavras_chave"])
+        tem_ferramenta_correspondente = any(f in ferramentas_chamadas for f in regras["ferramentas"])
+        if tem_linguagem_da_categoria and not tem_ferramenta_correspondente:
+            suspeitas.append(f"{categoria} (esperava-se uma de: {', '.join(regras['ferramentas'])})")
+
+    if not suspeitas:
+        return resposta
+
+    aviso = (
+        "\n\n---\n[SUPERDEV — aviso de fundamento (Nível 1.5)]\n"
+        "⚠️ Esta resposta usa linguagem típica de: " + "; ".join(suspeitas) +
+        " — mas a ferramenta correspondente nunca foi chamada nesta "
+        "troca. Pode estar inventado, não confirmado por nenhuma "
+        "pesquisa/leitura real."
+    )
+    return resposta + aviso
+
+
 def build_system_prompt(pedido: str, tenant_id: str | None = None):
     tenant_id = tenant_id or config.TENANT_PADRAO
     partes = [config.CORE_IDENTITY]
@@ -574,6 +656,10 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
         # houve mesmo uma resposta final (o ramo acima já é um erro
         # sem constantes citadas a verificar).
         resposta = _verificar_grounding(resposta, mensagens)
+        # Nível 1.5 (13 Ago 2026) — mesma condição, ver comentário
+        # junto à função: fundamento zero em categorias inteiras
+        # (web/ficheiro), não só números citados.
+        resposta = _verificar_fundamento_categorias(resposta, mensagens)
 
     # Fase de testes (9 Ago 2026, a pedido do utilizador): grava a
     # conversa real (pergunta+resposta), não só métricas — para o
