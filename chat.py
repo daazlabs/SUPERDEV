@@ -40,8 +40,34 @@ sai a sério. Ctrl+C enquanto o modelo está a gerar também passou a
 cancelar a ESPERA (deixa de bloquear o utilizador) — não cancela o
 trabalho no lado da Ollama, que continua a correr em segundo plano até
 terminar, só deixa de bloquear quem está a usar o terminal.
+
+COLAGEM DE TEXTO GRANDE FRAGMENTADA EM VÁRIOS PEDIDOS (13 Ago 2026) —
+bug real apanhado pelo utilizador ao colar um briefing longo: input()
+só lê UMA linha; se o terminal não sinalizar "isto é um paste"
+(bracketed paste — falha com frequência em tmux/SSH/certos terminais),
+cada quebra de linha dentro do texto colado é tratada exactamente como
+Enter a sério, e o ciclo abaixo manda cada linha ao agente como um
+pedido novo e independente. Confirmado nos logs: um briefing de ~28
+linhas virou ~28 pedidos separados, 43 chamadas à Ollama, 112 mil
+tokens de prompt em ~8 minutos — para o que devia ter sido 1 pedido.
+Pior: piora com o tempo, porque o histórico de curto prazo cresce a
+cada fragmento, por isso os fragmentos tardios pagam também o preço
+de arrastar todos os anteriores.
+
+Corrigido sem depender do terminal se comportar bem: _ler_pedido()
+mede o TEMPO entre linhas, não o conteúdo. Quando alguém está mesmo a
+escrever, há sempre uma pausa real (a pessoa tem de pensar/mover os
+dedos) entre carregar Enter e começar a linha seguinte. Numa colagem,
+todas as linhas já chegaram ao buffer do sistema de uma vez — a linha
+seguinte fica pronta a ler quase instantaneamente, sem ninguém à
+espera para a escrever. select() com um tecto curto (LIMIAR_PASTE_S)
+distingue os dois casos. Testado ao vivo simulando os dois cenários
+(ver HISTORICO.md): rajada de linhas sem pausa → 1 pedido só; linhas
+com pausa real entre elas → pedidos separados, como antes.
 """
 import readline  # noqa: F401 — activa edição de linha no input(), não é chamado directamente
+import select
+import sys
 import time
 
 from rich.console import Console
@@ -51,6 +77,29 @@ from rich.panel import Panel
 import agent
 
 console = Console()
+
+
+# Tecto de espera para decidir "já há mais uma linha à espera, sem
+# ninguém a escrever" — 50ms é generoso: mesmo um utilizador rápido
+# demora bem mais do que isto entre carregar Enter e começar a
+# escrever a linha seguinte a sério. Uma colagem entrega todas as
+# linhas ao buffer do sistema de uma só vez, muito mais depressa do
+# que isto.
+LIMIAR_PASTE_S = 0.05
+
+
+def _ler_pedido(prompt_texto: str) -> str:
+    """Lê 1+ linhas do utilizador, juntando-as num só pedido quando
+    chegam em rajada (colagem) — ver o comentário grande no topo do
+    ficheiro para o porquê. KeyboardInterrupt/EOFError propagam-se tal
+    e qual saíam de console.input() antes; se o Ctrl+C vier a meio de
+    juntar uma colagem grande, cancela o bloco inteiro (mesmo
+    comportamento de cancelar "a linha actual" que já existia, só que
+    agora "a linha actual" pode ter várias linhas por baixo)."""
+    linhas = [console.input(prompt_texto)]
+    while select.select([sys.stdin], [], [], LIMIAR_PASTE_S)[0]:
+        linhas.append(input())
+    return "\n".join(linhas).strip()
 
 
 def _banner() -> None:
@@ -69,7 +118,7 @@ def main() -> None:
     sessao = agent.nova_sessao()
     while True:
         try:
-            pedido = console.input("\n[bold yellow]Tu[/] › ").strip()
+            pedido = _ler_pedido("\n[bold yellow]Tu[/] › ")
         except KeyboardInterrupt:
             console.print("[dim](linha cancelada — Ctrl+D para sair)[/]")
             continue
