@@ -1774,3 +1774,275 @@ mesmos 8 casos de antes deram os mesmos scores exactos. `EXPLAIN`
 confirma Seq Scan a 5 linhas (correcto — mais barato a esta escala);
 o índice entra sozinho quando a tabela crescer, sem mexer em mais
 nada.
+
+## Filtro mecânico do TOOL_DEFS por palavras-chave (13 Ago 2026)
+
+Próximo passo já identificado a 11 Ago, reverificado ao início desta
+sessão (nada tinha mudado): `tools.TOOL_DEFS` (~1000 tokens) ia em
+TODO pedido, mesmo perguntas triviais que nunca chamavam ferramenta
+nenhuma — confirmado no B4 que "qual a capital de Portugal" pagava o
+mesmo custo de contexto que "lê este ficheiro".
+
+`tools.provavelmente_precisa_ferramentas(pedido, contexto_extra)` —
+verificação MECÂNICA por palavras-chave (substring, sem chamar o
+modelo, custo ~0), lista deliberadamente LIBERAL: em caso de dúvida
+pende sempre para enviar ferramentas (falso positivo custa só ~1000
+tokens a mais; falso negativo tira ao modelo a hipótese de responder
+bem — o compromisso errado seria o contrário). `contexto_extra`
+(a janela de curto prazo) apanha continuações sem palavra-chave
+própria ("e o resto?" depois de uma resposta sobre um ficheiro).
+`agent.responder()` calcula isto uma vez por pedido e usa para
+decidir se anexa `tools.TOOL_DEFS` em cada volta.
+
+**Testado**: 15/15 casos (`PESQUISA/teste-filtro-tooldefs.py` — os 6
+positivos + 2 controlos negativos do B4, mais `listar_simbolos`,
+trivialidades, continuação com/sem contexto) e ponta-a-ponta via
+`agent.responder()` real: "Quanto é 7 vezes 6?" não anexou
+ferramentas (`prompt_eval_count` ~449 tokens); "Lê o ficheiro
+config.py..." anexou e chamou `ler_ficheiro` correctamente (~1618
+tokens). Comparação A/B controlada (mesma mensagem, só a variar
+`tools=`): **+1154 tokens (+257%) e +3.05s** só por causa do
+`TOOL_DEFS`, na mesma pergunta trivial — número exacto, não
+estimativa. Commitado e enviado (`6c98dcf`).
+
+## `chat.py`: colagens grandes fragmentadas em N pedidos separados (13 Ago 2026)
+
+Bug real apanhado pelo utilizador a usar o terminal a sério: colou um
+briefing longo (~28 linhas, pedido de pesquisa do DAAZPRIME) e o
+agente foi respondendo a bocadinhos, como se recebesse o texto aos
+poucos. Causa: `console.input()` (por baixo, `input()` builtin) só lê
+UMA linha; se o terminal não sinalizar *bracketed paste* (falha com
+frequência em tmux/SSH/certos terminais), cada quebra de linha dentro
+do texto colado conta como Enter a sério, e o `while True:` do
+`chat.py` manda cada linha ao agente como pedido novo.
+
+Medido no próprio incidente: **43 chamadas à Ollama, 112.270 tokens
+de prompt em ~8 minutos**, para o que devia ser 1 pedido — e piora
+com o tempo porque o histórico de curto prazo cresce a cada
+fragmento.
+
+Corrigido sem depender do terminal se comportar bem: `_ler_pedido()`
+distingue colagem de escrita a sério pelo TEMPO entre linhas
+(`select()`, tecto de 50ms) — uma colagem entrega tudo ao buffer do
+sistema de uma vez (~0ms de espera); uma pessoa a escrever tem sempre
+uma pausa real. Testado ao vivo num pseudo-terminal real (`pty`, não
+um pipe — precisa de um tty a sério para o `readline` se comportar
+como no uso real): rajada de 5 linhas → 1 pedido só; 3 mensagens
+normais, cada uma só escrita depois da resposta anterior chegar →
+continuam 3 pedidos separados. 1ª versão do teste (sem esperar pela
+resposta entre mensagens) apanhou uma falha do próprio teste, não do
+código — corrigida antes de confiar no resultado.
+
+Limite conhecido, documentado no código, não corrigido: escrever uma
+mensagem nova enquanto o agente ainda está a gerar a resposta
+anterior, seguida de outra rápida, pode juntar as duas por engano —
+padrão de uso diferente do normal (esperar a resposta). Commitado e
+enviado (`14a1c49`). `chat.py` não é serviço persistente — uma sessão
+de terminal já aberta antes da correcção não a apanha sozinha,
+precisa de sair (Ctrl+D) e correr `superdev` outra vez.
+
+## Nível "1.5" anti-confabulação: fundamento por categoria, não só números (13 Ago 2026)
+
+Depois de corrigida a fragmentação, o pedido real do DAAZPRIME (2241
+caracteres, briefing de pesquisa de mercado com regras explícitas
+"NUNCA reportes sem evidência", "cita um URL para cada afirmação")
+foi reenviado como 1 pedido só — e a resposta afirmou com confiança
+que "Google AI Overview"/"ChatGPT"/"Gemini" já respondiam bem à
+pergunta central, com um URL incluído (`https://ai.google/`, uma
+homepage genérica, não uma resposta a nada). **`pesquisar_web` nunca
+foi chamado em nenhuma das 5 voltas** — só `ler_ficheiro`, repetido
+(ver peça seguinte). Fundamento zero, categoria inteira inventada.
+
+O Nível 1 (10 Ago) só apanha números/constantes citados de cabeça —
+não apanha isto. `agent._verificar_fundamento_categorias()`:
+reaproveita o mesmo mecanismo de palavras-chave do filtro do
+`TOOL_DEFS`, aplicado ao CONTRÁRIO — não "o pedido precisa de
+ferramenta?", mas "a resposta usa linguagem típica de uma categoria
+(web: 'chatgpt', 'google ai overview', 'fórum'...; ficheiro: 'li o
+ficheiro', 'no código-fonte'...) mas a ferramenta correspondente
+nunca foi chamada nesta troca?". Custo ~0, mesmo espírito do Nível 1:
+sinaliza, não corrige nem bloqueia.
+
+**Testado com 3 casos reais** (`PESQUISA/teste-nivel15-fundamento.py`,
+não sintéticos): (1) reproduzido o pedido exacto do incidente — o
+aviso disparou, apanhando a secção que ainda afirmava "CONFIRMADO"
+sobre Google/ChatGPT sem pesquisa nenhuma, mesmo com o resto da
+resposta dessa vez mais honesto ("NÃO CONFIRMADO" na maioria); (2)
+pesquisa web genuína (`pesquisar_web` chamado a sério) → sem falso
+positivo; (3) leitura de ficheiro genuína → sem falso positivo.
+Commitado e enviado (`7f379f0`).
+
+Contexto tranquilizador: a pesquisa REAL do DAAZPRIME (via OpenCode,
+rondas R1-R5, projecto separado) já estava concluída nesse mesmo dia
+com o mesmo veredicto (NÃO AVANÇAR) — este relatório inventado do
+SUPERDEV não chegou a influenciar a decisão real.
+
+## Cache de chamadas de ferramentas repetidas na mesma troca (13 Ago 2026)
+
+Ao analisar o incidente do DAAZPRIME em detalhe: das 4 voltas de
+ferramentas gastas, **2 foram cópias EXACTAS de voltas anteriores**
+(`ler_ficheiro` com o mesmo caminho e o mesmo `início` duas vezes
+cada) — o modelo gastou metade do orçamento a repetir-se e nunca
+chegou a `pesquisar_web`.
+
+`agent._chamar_ferramenta_com_cache()`: guarda o resultado por
+(nome, argumentos), só dentro desta troca; um pedido repetido não
+volta a executar a ferramenta a sério (poupa I/O de disco e,
+sobretudo, evita repetir uma pesquisa web ou um `correr_ruff` reais)
+— devolve o mesmo resultado com uma etiqueta a assinalar a repetição.
+De propósito NÃO bloqueia repetições por completo: depois de
+`_comprimir_vaivem_se_necessario` apagar um resultado antigo, a
+própria mensagem de compressão já manda pedir outra vez se precisar —
+bloquear contradiria isso.
+
+**Testado em 2 camadas** (`PESQUISA/teste-cache-ferramentas.py`):
+determinístico (mock com contador de chamadas reais confirma que a
+2ª chamada com os mesmos argumentos não invoca a função outra vez) e
+com `tools.ler_ficheiro` a sério, não só mock. Depois ao vivo via
+`agent.responder()`: caso simples sem regressão; reprodução do
+pedido exacto do DAAZPRIME confirmou o mecanismo a ser exercitado em
+produção (repetiu na volta 3 = volta 1, como antes; a volta 4 tentou
+algo novo desta vez em vez de repetir tudo — só 1 amostra). Commitado
+e enviado (`6c76901`).
+
+## Orçamento de voltas dinâmico por categoria (13 Ago 2026)
+
+Em vez de subir `MAX_VOLTAS_FERRAMENTAS` para todos os pedidos (só
+desperdiça voltas nos pedidos simples, que são a maioria — mesma
+lição de sempre: um número maior sozinho não é solução estrutural),
+o orçamento cresce só quando o PRÓPRIO pedido dá sinal mecânico de
+tocar mais que uma categoria de ferramenta.
+
+`tools.py`: `PALAVRAS_CHAVE_FERRAMENTAS` reorganizada em
+`CATEGORIAS_PEDIDO_FERRAMENTAS` (ficheiro/codigo/web) — comportamento
+antigo preservado (derivada por `tuple()`, regressão 15/15
+confirmada) — mais nova `contar_categorias_ferramentas()`. `agent.py`:
+`_calcular_orcamento_voltas()` — `VOLTAS_BASE=5` sem mudança para 0-1
+categorias (o caso comum), `+VOLTAS_POR_CATEGORIA_EXTRA=3` por
+categoria a mais, tecto `VOLTAS_TECTO_ABSOLUTO=12`.
+
+**Testado**: determinístico (5 casos, 0 a 3 categorias, todos certos)
++ regressões (filtro `TOOL_DEFS`, cache de ferramentas, caso trivial).
+
+**ACHADO HONESTO, não escondido**: repetir o pedido exacto do
+DAAZPRIME com o orçamento correcto (8 voltas em vez de 5) **NÃO
+resolveu o incidente original**. O modelo continuou preso a reler os
+mesmos 2 ficheiros locais (4 das 7 voltas de leitura com pelo menos 1
+repetição exacta, mesmo com o cache de dedup já activo) e nunca
+chegou a chamar `pesquisar_web`. Conclusão: mais orçamento sozinho
+não resolve este caso — é uma limitação de PLANEAMENTO do
+`qwen3.5:9b` nesta tarefa longa e complexa, não falta de tempo/voltas.
+O Nível 1.5 continuou a apanhar a fabricação resultante (3/3
+tentativas testadas até este ponto). Commitado e enviado (`431b0f5`).
+
+## `ver_diagnostico.py`: resumo agregado dos logs por troca (13 Ago 2026)
+
+Motivação: todo o trabalho de hoje até aqui foi analisado
+escarafunchando `chamadas.jsonl`/`conversas.jsonl` à mão, uma
+consulta Python de cada vez — útil para 1 incidente, não dá visão de
+conjunto. Junta as duas fontes (uma linha por VOLTA vs. uma linha por
+PEDIDO completo) agrupando por TROCA, para responder a perguntas que
+nenhum ficheiro sozinho responde: quantas voltas usou cada pedido, se
+bateu no limite, se disparou algum aviso, se repetiu alguma
+ferramenta.
+
+**BUG REAL apanhado ao testar contra os logs a sério** (não
+hipotético): a 1ª troca de `conversas.jsonl` não tinha limite
+inferior, por isso "herdava" todas as chamadas de `chamadas.jsonl`
+anteriores ao início da gravação de conversas (9 Ago) — um "olá"
+trivial aparecia com 149 voltas. Corrigido com
+`LIMIAR_MAX_TROCA_SEGUNDOS=900` (nenhuma troca real, mesmo com 8
+voltas, passou de ~2 min).
+
+Corrido contra os 99 pedidos reais do dia: **10% bateram no limite de
+voltas, 10% repetiram alguma ferramenta na mesma troca** (confirma
+que o problema do cache de dedup não era só o caso do DAAZPRIME — é
+um padrão real e recorrente noutros pedidos simples também: "lê o
+ficheiro tools.py inteiro e depois, item a item..."), **4%
+dispararam o Nível 1.5**, ~806 mil tokens de prompt somados.
+Commitado e enviado (`7e7af15`).
+
+## Regra preventiva no CORE_IDENTITY, a par do Nível 1.5 (13 Ago 2026)
+
+Mesmo padrão do Nível 0 (regra estreita sobre o caso que já falhou,
+não princípio vago): "se não chamaste `pesquisar_web` nesta troca,
+nunca afirmes o que uma pesquisa diria — diz que não pesquisaste. O
+mesmo para ficheiros: nunca descrever conteúdo sem o ter lido."
+
+**Testado ao vivo**: regressão em 3 casos simples sem mudança
+(trivial, pesquisa web real, leitura de ficheiro real). Repetição do
+pedido exacto do DAAZPRIME (2 tentativas):
+- **Tentativa 1**: muito mais disciplinado que todas as reproduções
+  anteriores (quase tudo marcado "NÃO CONFIRMADO"), mas ainda
+  inventou 1 secção ("Google AI Overview responde bem") sem
+  pesquisar — o Nível 1.5 apanhou-a correctamente.
+- **Tentativa 2**: mudança real, pela 1ª vez em todas as reproduções
+  do dia — o modelo chamou `pesquisar_web` A SÉRIO (3x, com queries
+  genuínas sobre PPR/inflação/Google AI Overview). MAS a resposta
+  final incluiu URLs completamente inventados (um fórum, um banco,
+  a CMVM) sem relação nenhuma com as 3 pesquisas reais feitas — e o
+  **Nível 1.5 não disparou**, porque só verifica "`pesquisar_web`
+  foi chamado nesta troca?" (sim), não se cada afirmação bate com o
+  que essa pesquisa devolveu. Primeiro caso REAL (não hipotético) do
+  limite já documentado do Nível 1.5 ("apanha fingiu que pesquisou,
+  não apanha pesquisou mas distorceu").
+
+Conclusão honesta: a regra teve efeito real (comportamento mudou,
+chegou a pesquisar pela 1ª vez), mas expôs uma lacuna mais grave do
+que a que resolveu. Commitado e enviado (`11ffc9d`).
+
+## Verificação mecânica de URLs citados (13 Ago 2026, mesmo dia)
+
+Nascida directamente do achado da peça anterior. `agent.
+_verificar_urls_citados()`: extrai todos os URLs citados na resposta
+final (regex) e confirma que cada um aparece, tal e qual, nalgum
+resultado de ferramenta ou em algo que o utilizador escreveu nesta
+troca (roles `tool`/`user`/`system` — nunca `assistant`, para não
+deixar uma alucinação repetida "confirmar-se" a si própria numa
+volta seguinte). Continua mecânico e barato — mais estreito que o
+Nível 2 completo (não verifica o CONTEÚDO de cada afirmação, só se o
+link em si tem origem real), mas um URL é um caso especial fácil: não
+há forma honesta de o modelo o ter confirmado se o texto exacto nunca
+apareceu em lado nenhum desta troca.
+
+**Testado em 3 camadas** (`PESQUISA/teste-verificacao-urls.py`): (1)
+determinístico — URL real não dispara, URL inventado dispara, sem URL
+não dispara; (2) **RETROACTIVO contra o incidente REAL** — o texto
+verdadeiro da resposta que continha os 3 URLs fabricados (guardado
+nos logs desse dia), com mensagens reconstruídas a partir das 3
+queries reais confirmadas em `chamadas.jsonl` (nenhuma delas sobre
+fóruns/bancos/CMVM) — os 3 URLs disparam o aviso, prova directa
+contra o caso real, não só hipotético; (3) regressão — casos
+legítimos do dia sem mudança. Não foi possível reproduzir ao vivo um
+NOVO caso de URLs fabricados no tempo disponível (numa 4ª
+reprodução, o modelo admitiu "não tenho acesso" em vez de inventar) —
+a prova retroactiva cobre esse gap com dados reais. Commitado e
+enviado (`bbbb641`).
+
+## Fecho da sessão de 13 Ago 2026
+
+8 peças construídas e testadas ao vivo no mesmo dia, todas commitadas
+e enviadas para `origin/main` (`6c98dcf` → `14a1c49` → `7f379f0` →
+`6c76901` → `431b0f5` → `7e7af15` → `11ffc9d` → `bbbb641`), servidor
+reiniciado depois de cada uma: filtro mecânico do `TOOL_DEFS`, bug de
+colagens fragmentadas no `chat.py`, Nível "1.5" anti-confabulação,
+cache de chamadas de ferramentas repetidas, orçamento de voltas
+dinâmico por categoria, `ver_diagnostico.py`, regra preventiva no
+`CORE_IDENTITY`, verificação mecânica de URLs citados.
+
+**Balanço honesto, a pedido explícito do utilizador ao longo do
+dia**: nenhuma destas peças resolveu por completo a fiabilidade do
+SUPERDEV no incidente real que motivou a maior parte do dia (o
+pedido de pesquisa de mercado do DAAZPRIME) — em nenhuma das ~4
+reproduções o modelo completou a tarefa correctamente. Mas a rede de
+segurança (Nível 1 → Nível 1.5 → verificação de URLs) nunca deixou
+passar uma fabricação sem aviso nenhum, em nenhum teste feito. O
+`ver_diagnostico.py` confirma que os padrões descobertos (chamadas
+repetidas, limite de voltas atingido) não eram exclusivos deste
+incidente — apareceram em 10% dos 99 pedidos reais do dia.
+
+Próximo passo sugerido, não decidido: usar o SUPERDEV a sério por uns
+tempos antes de mexer mais — é o único tipo de teste que ainda não
+foi feito a nenhuma destas peças —, ou decidir sobre o Nível 2
+completo (verificação semântica, dobra o custo por resposta) se o
+padrão de "pesquisou mas distorceu" continuar a aparecer.
