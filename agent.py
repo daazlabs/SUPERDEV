@@ -358,6 +358,64 @@ def _verificar_fundamento_categorias(resposta: str, mensagens: list) -> str:
     return resposta + aviso
 
 
+# Verificação de URLs citados (13 Ago 2026, ver HISTORICO.md) —
+# incidente real motivador: ao testar a regra preventiva acima, o
+# modelo chamou pesquisar_web A SÉRIO (3 vezes) e MESMO ASSIM a
+# resposta final incluiu URLs completamente inventados (um fórum, um
+# banco, a CMVM) sem relação nenhuma com as 3 pesquisas reais feitas.
+# O Nível 1.5 não apanha isto — só confirma "pesquisar_web foi
+# chamado?" (sim), não confirma se CADA afirmação bate com o que essa
+# pesquisa devolveu. É exactamente "pesquisou mas inventou por cima",
+# o caso que o Nível 1.5 já avisava não cobrir.
+#
+# Continua deliberadamente mecânico e barato (regex + substring, sem
+# chamar o modelo) — não é o Nível 2 completo (que exigiria perceber
+# se o CONTEÚDO de cada afirmação bate com o resultado, não só o
+# link). Mas um URL é um caso especial fácil: um link real citado
+# como prova tem de ter vindo de algum lado (resultado de ferramenta,
+# ou o próprio utilizador a dá-lo) — se o texto exacto do URL nunca
+# apareceu em nenhum resultado de ferramenta nem em nada que o
+# utilizador escreveu nesta troca, não há forma honesta de o modelo o
+# ter "confirmado". Não conta o que o próprio modelo já disse antes
+# nesta troca (role "assistant") como fonte válida — um URL inventado
+# numa volta não se torna "confirmado" só por ser repetido depois.
+_PADRAO_URL = re.compile(r'https?://[^\s<>"\')\]]+')
+
+
+def _limpar_url(url: str) -> str:
+    """Tira pontuação de fecho de frase/markdown colada ao URL (ex.:
+    'https://exemplo.com/pagina.' ou '(https://exemplo.com)') — sem
+    isto, um URL correcto no fim de uma frase nunca batia certo com o
+    mesmo URL no texto da ferramenta, por causa do ponto final."""
+    return url.rstrip('.,;:!?)"\']>')
+
+
+def _verificar_urls_citados(resposta: str, mensagens: list) -> str:
+    """Cada URL que a resposta final cita como prova tem de aparecer,
+    tal e qual, nalgum resultado de ferramenta ou em algo que o
+    utilizador escreveu nesta troca — senão não há forma honesta de
+    ter sido "confirmado". Não corrige nem apaga, só assinala, mesmo
+    princípio dos níveis acima."""
+    urls_citados = {_limpar_url(u) for u in _PADRAO_URL.findall(resposta)}
+    if not urls_citados:
+        return resposta
+
+    texto_fontes = "\n".join(
+        m.get("content") or "" for m in mensagens if m.get("role") in ("tool", "user", "system")
+    )
+    nao_confirmados = sorted(u for u in urls_citados if u not in texto_fontes)
+    if not nao_confirmados:
+        return resposta
+
+    aviso = (
+        "\n\n---\n[SUPERDEV — aviso de URLs não confirmados]\n"
+        "⚠️ Estes links não aparecem em nenhum resultado de ferramenta "
+        "nem em nada que escreveste nesta troca — podem estar "
+        "inventados: " + "; ".join(nao_confirmados)
+    )
+    return resposta + aviso
+
+
 def build_system_prompt(pedido: str, tenant_id: str | None = None):
     tenant_id = tenant_id or config.TENANT_PADRAO
     partes = [config.CORE_IDENTITY]
@@ -727,6 +785,9 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
         # junto à função: fundamento zero em categorias inteiras
         # (web/ficheiro), não só números citados.
         resposta = _verificar_fundamento_categorias(resposta, mensagens)
+        # Verificação de URLs (13 Ago 2026) — apanha "pesquisou mas
+        # inventou por cima", que o Nível 1.5 sozinho não cobre.
+        resposta = _verificar_urls_citados(resposta, mensagens)
 
     # Fase de testes (9 Ago 2026, a pedido do utilizador): grava a
     # conversa real (pergunta+resposta), não só métricas — para o
