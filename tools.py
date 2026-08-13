@@ -730,33 +730,51 @@ FUNCOES = {
 # sequer tentar responder bem — o compromisso errado. Junta
 # vocabulário português (o utilizador escreve sempre em português)
 # com alguns termos ingleses das próprias descrições em TOOL_DEFS.
+#
+# ORGANIZADA POR CATEGORIA (13 Ago 2026) — inicialmente era uma lista
+# só, sem categorias; separada para servir um 2º propósito além de
+# "precisa de TOOL_DEFS?": dimensionar o orçamento de voltas de
+# ferramentas por pedido (ver agent.MAX_VOLTAS_FERRAMENTAS /
+# contar_categorias_ferramentas abaixo). Achado real que motivou isto:
+# no incidente do DAAZPRIME, o pedido tocava 2 categorias (ficheiro E
+# web) mas só tinha o orçamento fixo de sempre — nunca chegou a
+# pesquisar. "continuação" fica de fora das categorias de propósito:
+# não diz QUAL ferramenta vai fazer falta, só que o contexto anterior
+# continua a valer.
+CATEGORIAS_PEDIDO_FERRAMENTAS = {
+    "ficheiro": (
+        "ficheiro", "ficheiros", "arquivo", "arquivos", "pasta", "pastas",
+        "directoria", "diretoria", "diretório", "directório", "caminho",
+        "path", "file", "folder", "directory",
+        "lê ", "ler ", "abre ", "abrir ", "conteúdo", "o que há em",
+        "o que tem", "read",
+        "lista ", "listar ", "listagem", "list ",
+        "procura", "procurar", "encontra", "encontrar", "grep", "onde está",
+        "onde aparece", "search",
+        ".py", ".js", ".ts", ".json", ".md", ".txt", ".yaml", ".yml",
+    ),
+    "codigo": (
+        "código", "codigo", "code", "função", "funções", "classe",
+        "classes", "símbolo", "símbolos", "módulo", "modulo", "linter",
+        "ruff", "lint", "erro de sintaxe", "corre o", "executa o",
+        "verifica este código", "revê este código", "revisa este código",
+    ),
+    "web": (
+        "pesquisa na web", "pesquisa online", "internet", "notícia",
+        "notícias", "actual", "atual", "hoje em dia", "últimas", "site",
+        "página web", "url", "http",
+    ),
+}
+
+# Continuação de um pedido anterior — não tem palavra-chave própria, o
+# sinal está no que veio antes (por isso o chamador passa a troca
+# anterior em contexto_extra). Conta para "precisa de ferramenta
+# alguma?" mas não para "quantas categorias distintas?".
+_PALAVRAS_CONTINUACAO = ("continua", "continuar", "resto")
+
 PALAVRAS_CHAVE_FERRAMENTAS = (
-    # ficheiros / pastas
-    "ficheiro", "ficheiros", "arquivo", "arquivos", "pasta", "pastas",
-    "directoria", "diretoria", "diretório", "directório", "caminho",
-    "path", "file", "folder", "directory",
-    # ler / abrir / mostrar conteúdo
-    "lê ", "ler ", "abre ", "abrir ", "conteúdo", "o que há em",
-    "o que tem", "read",
-    # listar
-    "lista ", "listar ", "listagem", "list ",
-    # procurar / grep
-    "procura", "procurar", "encontra", "encontrar", "grep", "onde está",
-    "onde aparece", "search",
-    # código / estrutura / lint
-    "código", "codigo", "code", "função", "funções", "classe",
-    "classes", "símbolo", "símbolos", "módulo", "modulo", "linter",
-    "ruff", "lint", "erro de sintaxe", "corre o", "executa o",
-    "verifica este código", "revê este código", "revisa este código",
-    ".py", ".js", ".ts", ".json", ".md", ".txt", ".yaml", ".yml",
-    # pesquisa web
-    "pesquisa na web", "pesquisa online", "internet", "notícia",
-    "notícias", "actual", "atual", "hoje em dia", "últimas", "site",
-    "página web", "url", "http",
-    # continuação de um pedido anterior (não tem palavra-chave própria
-    # — o sinal está no que veio antes, por isso o chamador também
-    # deve passar o texto da troca anterior em contexto_extra)
-    "continua", "continuar", "resto",
+    tuple(termo for categoria in CATEGORIAS_PEDIDO_FERRAMENTAS.values() for termo in categoria)
+    + _PALAVRAS_CONTINUACAO
 )
 
 
@@ -772,3 +790,20 @@ def provavelmente_precisa_ferramentas(pedido: str, contexto_extra: str = "") -> 
     PALAVRAS_CHAVE_FERRAMENTAS para o porquê."""
     texto = f"{pedido} {contexto_extra}".lower()
     return any(termo in texto for termo in PALAVRAS_CHAVE_FERRAMENTAS)
+
+
+def contar_categorias_ferramentas(pedido: str, contexto_extra: str = "") -> int:
+    """Quantas categorias DISTINTAS de ferramenta (ficheiro/código/web)
+    o pedido parece tocar — não SE precisa de ferramentas (isso é
+    provavelmente_precisa_ferramentas), mas de QUANTAS espécies
+    diferentes. Usado só para dimensionar o orçamento de voltas por
+    pedido (agent.responder()); um pedido que só fala de ficheiros
+    tende a fechar-se depressa, um que fala de ficheiros E web precisa
+    de mais idas-e-voltas para chegar às duas coisas — é exactamente o
+    que faltou no incidente real do DAAZPRIME."""
+    texto = f"{pedido} {contexto_extra}".lower()
+    return sum(
+        1
+        for palavras in CATEGORIAS_PEDIDO_FERRAMENTAS.values()
+        if any(termo in texto for termo in palavras)
+    )

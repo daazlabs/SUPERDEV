@@ -380,7 +380,34 @@ def build_system_prompt(pedido: str, tenant_id: str | None = None):
 # volta, porque o modelo queria pedir a 2ª ferramenta mas não lhe
 # eram oferecidas. Confirmado com teste directo: oferecendo "tools"
 # também na 2ª volta, o modelo pediu correctamente a 2ª ferramenta.
-MAX_VOLTAS_FERRAMENTAS = 5
+#
+# ORÇAMENTO DINÂMICO POR CATEGORIA (13 Ago 2026) — antes era um único
+# número fixo para todos os pedidos. Achado real no incidente do
+# DAAZPRIME: o pedido tocava 2 categorias (ficheiro E web,
+# tools.contar_categorias_ferramentas), mas só tinha as mesmas 5
+# voltas de sempre — gastou-as todas a lidar com ficheiros, nunca
+# chegou a pesquisar. Em vez de subir o número fixo para todos os
+# pedidos (desperdiça voltas nos pedidos simples, que são a maioria —
+# mesma lição de sempre: um número maior sozinho não é solução
+# estrutural), o orçamento cresce só quando o PRÓPRIO pedido dá sinal
+# mecânico de precisar de mais que uma categoria de ferramenta.
+# VOLTAS_BASE é o valor de sempre, sem mudança para o caso comum (1
+# categoria ou nenhuma); VOLTAS_TECTO_ABSOLUTO existe para o caso de
+# CATEGORIAS_PEDIDO_FERRAMENTAS crescer no futuro — nunca deixa o
+# orçamento fugir sem controlo, mesma protecção de sempre contra ciclo
+# infinito.
+VOLTAS_BASE = 5
+VOLTAS_POR_CATEGORIA_EXTRA = 3
+VOLTAS_TECTO_ABSOLUTO = 12
+
+
+def _calcular_orcamento_voltas(pedido: str, contexto_extra: str = "") -> int:
+    """Quantas voltas de ferramentas dar a ESTE pedido — ver o
+    comentário acima de VOLTAS_BASE para o porquê. 1 categoria (o caso
+    comum) devolve sempre VOLTAS_BASE, sem mudança de comportamento."""
+    categorias = tools.contar_categorias_ferramentas(pedido, contexto_extra)
+    extra = max(categorias - 1, 0) * VOLTAS_POR_CATEGORIA_EXTRA
+    return min(VOLTAS_BASE + extra, VOLTAS_TECTO_ABSOLUTO)
 
 # B1 (11 Ago 2026, ver PESQUISA/relatorio-mercado.md secções 2.1/6.2)
 # — guarda contra a acumulação de resultados de ferramentas DENTRO de
@@ -595,25 +622,26 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
     # já está na lista, mas "e o resto?" só se apanha assim).
     contexto_janela = " ".join((m.get("content") or "") for m in janela)
     precisa_ferramentas = tools.provavelmente_precisa_ferramentas(pedido, contexto_janela)
+    max_voltas = _calcular_orcamento_voltas(pedido, contexto_janela)
 
     resposta = None
     tentativas = []  # ver comentário abaixo — só usado se o limite for excedido
     cache_ferramentas = {}  # só desta troca — ver _chamar_ferramenta_com_cache
-    for i in range(MAX_VOLTAS_FERRAMENTAS):
+    for i in range(max_voltas):
         # Degradação suave (11 Ago 2026) — antes, se o modelo ainda
         # quisesse ferramentas na ÚLTIMA volta permitida, o ciclo
         # acabava sem nunca lhe dar hipótese de responder, e caía
         # sempre no "[ERRO] Excedi o limite" abaixo — mesmo quando já
         # tinha lido 90% do que precisava. Não é mais chamadas (o
-        # número de voltas não mudou, continuam a ser
-        # MAX_VOLTAS_FERRAMENTAS no total): na última volta,
-        # simplesmente não se oferecem ferramentas — o modelo é
+        # número de voltas não mudou, continuam a ser max_voltas no
+        # total, ver _calcular_orcamento_voltas acima): na última
+        # volta, simplesmente não se oferecem ferramentas — o modelo é
         # obrigado a responder já com o que já leu, e um pedido curto
         # (não gravado no histórico real, só usado nesta chamada) diz-
         # lhe para admitir o que ficou por confirmar em vez de
         # adivinhar. Resultado: quase nunca mais um erro seco, sempre
         # uma resposta com alguma coisa aproveitável.
-        ultima_volta = i == MAX_VOLTAS_FERRAMENTAS - 1
+        ultima_volta = i == max_voltas - 1
         mensagens_desta_chamada = mensagens
         if ultima_volta:
             mensagens_desta_chamada = mensagens + [{
@@ -687,7 +715,7 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
         # por isso uma explicação a seguir é grounded, não confabulada.
         resposta = (
             "[ERRO] Excedi o limite de voltas de ferramentas "
-            f"({MAX_VOLTAS_FERRAMENTAS}) sem chegar a uma resposta final. "
+            f"({max_voltas}) sem chegar a uma resposta final. "
             f"Tentativas: {'; '.join(tentativas)}"
         )
     else:
