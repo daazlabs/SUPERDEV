@@ -421,6 +421,48 @@ def _envolver_como_dado(resultado: str) -> str:
     return f"{_INICIO_DADOS}\n{resultado}\n{_FIM_DADOS}"
 
 
+# Cache de chamadas repetidas dentro da MESMA troca (13 Ago 2026, ver
+# HISTORICO.md) — achado real ao analisar o incidente do DAAZPRIME:
+# das 4 voltas de ferramentas gastas, 2 foram cópias EXACTAS de voltas
+# anteriores (ler_ficheiro com o mesmo caminho e o mesmo "início" duas
+# vezes cada) — o modelo nunca chegou a chamar pesquisar_web porque
+# gastou metade do orçamento de MAX_VOLTAS_FERRAMENTAS a repetir-se.
+#
+# Não impede o modelo de pedir outra vez (não sabemos se é engano ou
+# se é de propósito, ex.: depois de _comprimir_vaivem_se_necessario
+# apagar um resultado antigo, a própria mensagem de compressão manda
+# "pede outra vez se precisares mesmo dele" — bloquear a repetição por
+# completo contradiria isso). Em vez disso: não volta a EXECUTAR a
+# ferramenta a sério (poupa I/O de disco, e sobretudo evita repetir
+# uma pesquisa web ou um correr_ruff reais só para chegar ao mesmo
+# resultado) e devolve o mesmo conteúdo já obtido, com uma etiqueta
+# curta a tornar visível que é uma repetição — para o modelo ter
+# hipótese de reparar sozinho e mudar de estratégia na volta seguinte,
+# em vez de continuar a repetir sem nunca ser avisado.
+def _chamar_ferramenta_com_cache(nome: str, args: dict, cache: dict) -> str:
+    """`cache` é um dict só desta troca (criado de novo em cada
+    responder()), chave = (nome, args serializados de forma estável).
+    Devolve sempre o resultado real (nunca inventa nem esconde dados),
+    só evita repetir o trabalho e assinala quando é repetição."""
+    chave = (nome, json.dumps(args, sort_keys=True, ensure_ascii=False))
+    se_repeticao = chave in cache
+    if se_repeticao:
+        resultado = cache[chave]
+    else:
+        funcao = tools.FUNCOES.get(nome)
+        resultado = funcao(**args) if funcao else f"[ERRO] ferramenta desconhecida: {nome}"
+        cache[chave] = resultado
+
+    if se_repeticao:
+        return (
+            "[SUPERDEV interno: já chamaste esta ferramenta com estes "
+            "mesmos argumentos nesta troca — o resultado é igual ao de "
+            "antes, repetir não traz informação nova. Considera tentar "
+            "uma ferramenta ou argumento diferente.]\n" + resultado
+        )
+    return resultado
+
+
 def _comprimir_vaivem_se_necessario(mensagens: list, inicio_vaivem: int) -> None:
     """Modifica `mensagens` no próprio sítio — substitui o conteúdo de
     resultados de ferramentas mais antigos desta troca por um resumo
@@ -556,6 +598,7 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
 
     resposta = None
     tentativas = []  # ver comentário abaixo — só usado se o limite for excedido
+    cache_ferramentas = {}  # só desta troca — ver _chamar_ferramenta_com_cache
     for i in range(MAX_VOLTAS_FERRAMENTAS):
         # Degradação suave (11 Ago 2026) — antes, se o modelo ainda
         # quisesse ferramentas na ÚLTIMA volta permitida, o ciclo
@@ -620,11 +663,7 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
             nome = chamada["function"]["name"]
             args = chamada["function"]["arguments"]
             tentativas.append(f"{nome}({args})")
-            funcao = tools.FUNCOES.get(nome)
-            if funcao:
-                resultado = funcao(**args)
-            else:
-                resultado = f"[ERRO] ferramenta desconhecida: {nome}"
+            resultado = _chamar_ferramenta_com_cache(nome, args, cache_ferramentas)
             mensagens.append({"role": "tool", "content": _envolver_como_dado(resultado)})
         _comprimir_vaivem_se_necessario(mensagens, inicio_vaivem)
 
