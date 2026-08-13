@@ -713,3 +713,62 @@ FUNCOES = {
     "pesquisar_web": pesquisar_web,
     "listar_simbolos": listar_simbolos,
 }
+
+
+# Filtro mecânico de relevância (13 Ago 2026, ver HISTORICO.md) —
+# TOOL_DEFS pesa ~1000 tokens e ia em TODO pedido, mesmo perguntas
+# triviais que nunca chamavam ferramenta nenhuma (confirmado no B4:
+# "qual a capital de Portugal" pagava o mesmo custo de contexto que
+# "lê este ficheiro"). Verificação MECÂNICA — substring matching,
+# sem chamar o modelo — mesmo espírito e custo (~0, só string
+# matching) do Nível 1 anti-confabulação em agent.py.
+#
+# Lista deliberadamente LIBERAL, não afinada a um caso preciso: a
+# pedido do utilizador, em caso de dúvida isto tem de pender para
+# ENVIAR ferramentas. Um falso positivo só custa os ~1000 tokens de
+# TOOL_DEFS a mais; um falso negativo tira ao modelo a hipótese de
+# sequer tentar responder bem — o compromisso errado. Junta
+# vocabulário português (o utilizador escreve sempre em português)
+# com alguns termos ingleses das próprias descrições em TOOL_DEFS.
+PALAVRAS_CHAVE_FERRAMENTAS = (
+    # ficheiros / pastas
+    "ficheiro", "ficheiros", "arquivo", "arquivos", "pasta", "pastas",
+    "directoria", "diretoria", "diretório", "directório", "caminho",
+    "path", "file", "folder", "directory",
+    # ler / abrir / mostrar conteúdo
+    "lê ", "ler ", "abre ", "abrir ", "conteúdo", "o que há em",
+    "o que tem", "read",
+    # listar
+    "lista ", "listar ", "listagem", "list ",
+    # procurar / grep
+    "procura", "procurar", "encontra", "encontrar", "grep", "onde está",
+    "onde aparece", "search",
+    # código / estrutura / lint
+    "código", "codigo", "code", "função", "funções", "classe",
+    "classes", "símbolo", "símbolos", "módulo", "modulo", "linter",
+    "ruff", "lint", "erro de sintaxe", "corre o", "executa o",
+    "verifica este código", "revê este código", "revisa este código",
+    ".py", ".js", ".ts", ".json", ".md", ".txt", ".yaml", ".yml",
+    # pesquisa web
+    "pesquisa na web", "pesquisa online", "internet", "notícia",
+    "notícias", "actual", "atual", "hoje em dia", "últimas", "site",
+    "página web", "url", "http",
+    # continuação de um pedido anterior (não tem palavra-chave própria
+    # — o sinal está no que veio antes, por isso o chamador também
+    # deve passar o texto da troca anterior em contexto_extra)
+    "continua", "continuar", "resto",
+)
+
+
+def provavelmente_precisa_ferramentas(pedido: str, contexto_extra: str = "") -> bool:
+    """Decide, por palavras-chave (substring, case-insensitive), se
+    vale a pena anexar TOOL_DEFS a este pedido. `contexto_extra`
+    (tipicamente a troca anterior da conversa) apanha pedidos de
+    continuação sem palavra-chave própria, tipo "continua" a seguir a
+    uma resposta que já falava de um ficheiro.
+
+    Sem pontuação nem threshold — uma única correspondência já chega.
+    Por desenho PENDE PARA O SIM: ver o comentário acima de
+    PALAVRAS_CHAVE_FERRAMENTAS para o porquê."""
+    texto = f"{pedido} {contexto_extra}".lower()
+    return any(termo in texto for termo in PALAVRAS_CHAVE_FERRAMENTAS)

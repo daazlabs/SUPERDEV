@@ -5,7 +5,9 @@ Ciclo por pedido:
   1. recebe o pedido do utilizador
   2. vai buscar memória relevante (pgmemory.retrieve, isolado por tenant)
   3. monta o contexto mínimo (núcleo + memória recuperada)
-  4. chama o modelo, com as ferramentas disponíveis (tools.TOOL_DEFS)
+  4. chama o modelo, com as ferramentas disponíveis (tools.TOOL_DEFS) —
+     só se o filtro mecânico (tools.provavelmente_precisa_ferramentas)
+     achar que vale a pena, ver 13 Ago 2026 abaixo
   5. se o modelo pedir uma ferramenta, executa-a e volta a chamar com
      o resultado; senão devolve a resposta directa
 
@@ -17,6 +19,13 @@ MEMÓRIA (9 Ago 2026) — passou de ficheiros (memory.py) para Postgres+
 pgvector (pgmemory.py), testado e calibrado nesse dia (ver
 HISTORICO.md). memory.py/memory/*.md ficam como registo histórico e
 motor de referência, mas já não são o que o agente usa ao vivo.
+
+TOOL_DEFS CONDICIONAL (13 Ago 2026) — antes, tools.TOOL_DEFS
+(~1000 tokens) ia em todo pedido, mesmo perguntas triviais que nunca
+chamavam ferramenta nenhuma. Filtro mecânico por palavras-chave
+(tools.provavelmente_precisa_ferramentas, sem chamar o modelo) decide
+por pedido se vale a pena — ver o comentário junto à função em
+tools.py para a lógica e o porquê de pender sempre para o "sim".
 """
 import json
 import os
@@ -42,7 +51,10 @@ def _log(registo: dict, caminho: str | None = None) -> None:
 
 
 def ollama_chat(
-    messages: list, ferramentas: list | None = None, memorias_usadas: list | None = None
+    messages: list,
+    ferramentas: list | None = None,
+    memorias_usadas: list | None = None,
+    filtro_ferramentas: bool | None = None,
 ) -> tuple[dict, str | None]:
     """Chama a Ollama e devolve (mensagem completa, done_reason).
 
@@ -57,7 +69,13 @@ def ollama_chat(
     palavra, sem qualquer aviso — o utilizador só descobria olhando
     para o texto. Devolvido à parte (não misturado dentro do dict da
     mensagem) para não poluir o objecto antes de ele ser reenviado à
-    Ollama como contexto na volta seguinte."""
+    Ollama como contexto na volta seguinte.
+
+    filtro_ferramentas (13 Ago 2026) não afecta a chamada — só é
+    registado no log, para se distinguir depois "sem tools porque o
+    filtro mecânico (tools.provavelmente_precisa_ferramentas) decidiu
+    que não fazia falta" de "sem tools porque já é a última volta"
+    (responder() decide isso antes de chamar aqui)."""
     body_dict = {
         "model": config.MODEL,
         "messages": messages,
@@ -87,6 +105,7 @@ def ollama_chat(
         "system_tamanho_chars": len(messages[0]["content"]) if messages and messages[0]["role"] == "system" else 0,
         "memorias_usadas": memorias_usadas or [],
         "tinha_ferramentas": bool(ferramentas),
+        "filtro_ferramentas_pedido": filtro_ferramentas,
         "pediu_ferramenta": bool(data["message"].get("tool_calls")),
         # Nome + argumentos de cada ferramenta pedida nesta volta — antes
         # só se sabia "pediu ferramenta: sim/não", uma caixa negra quando
@@ -443,6 +462,16 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
     ]
     inicio_vaivem = len(mensagens)  # tudo a partir daqui é vaivém de ferramentas desta troca (B1)
 
+    # Filtro mecânico de TOOL_DEFS (13 Ago 2026, ver tools.py e
+    # HISTORICO.md) — calculado uma vez por pedido, não por volta:
+    # se este pedido claramente não tem palavra-chave nenhuma de
+    # ferramenta, poupa os ~1000 tokens de TOOL_DEFS em todas as
+    # voltas. A janela (troca anterior) entra como contexto extra
+    # para apanhar continuações sem palavra-chave própria ("continua"
+    # já está na lista, mas "e o resto?" só se apanha assim).
+    contexto_janela = " ".join((m.get("content") or "") for m in janela)
+    precisa_ferramentas = tools.provavelmente_precisa_ferramentas(pedido, contexto_janela)
+
     resposta = None
     tentativas = []  # ver comentário abaixo — só usado se o limite for excedido
     for i in range(MAX_VOLTAS_FERRAMENTAS):
@@ -474,8 +503,9 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
             }]
         mensagem, done_reason = ollama_chat(
             mensagens_desta_chamada,
-            ferramentas=None if ultima_volta else tools.TOOL_DEFS,
+            ferramentas=None if (ultima_volta or not precisa_ferramentas) else tools.TOOL_DEFS,
             memorias_usadas=memorias_usadas,
+            filtro_ferramentas=precisa_ferramentas,
         )
 
         if not mensagem.get("tool_calls"):
