@@ -30,6 +30,7 @@ tools.py para a lógica e o porquê de pender sempre para o "sim".
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.request
@@ -37,6 +38,23 @@ import urllib.request
 import config
 import pgmemory
 import tools
+
+# Commit em produção (16 Ago 2026, ver HISTORICO.md e a conversa com o
+# utilizador sobre o gap "sem marca antes/depois por commit" no
+# ver_diagnostico.py) — calculado uma única vez no arranque, não a
+# cada pedido (não muda a meio de o servidor estar de pé, não vale a
+# pena o custo de um subprocess por chamada). Gravado em cada linha de
+# log (chamadas.jsonl e conversas.jsonl) para se poder agregar
+# "antes/depois" de uma mudança específica, em vez de uma média cega
+# sobre todos os dias misturados. "desconhecido" se não for um
+# checkout git (nunca deve acontecer aqui, mas sem crash por isto).
+try:
+    _COMMIT_ATUAL = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=config.BASE_DIR, capture_output=True, text=True, timeout=2, check=True,
+    ).stdout.strip()
+except Exception:
+    _COMMIT_ATUAL = "desconhecido"
 
 
 def _log(registo: dict, caminho: str | None = None) -> None:
@@ -101,6 +119,7 @@ def ollama_chat(
     # e o que decidimos nós (options, think, memórias trazidas).
     _log({
         "timestamp": time.time(),
+        "commit": _COMMIT_ATUAL,
         "pedido_tamanho_chars": len(messages[-1]["content"]) if messages[-1].get("content") else 0,
         "system_tamanho_chars": len(messages[0]["content"]) if messages and messages[0]["role"] == "system" else 0,
         "memorias_usadas": memorias_usadas or [],
@@ -896,6 +915,7 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
     _log(
         {
             "timestamp": time.time(),
+            "commit": _COMMIT_ATUAL,
             "tenant_id": sessao["tenant_id"],
             "pedido": pedido,
             "resposta": resposta,

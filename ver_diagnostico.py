@@ -16,9 +16,25 @@ fazem sentido perguntas como "quantas voltas usou", "repetiu alguma
 ferramenta", "disparou algum aviso" — cada linha de chamadas.jsonl,
 sozinha, não sabe nada disto.
 
+16 Ago 2026 — dois gaps fechados a pedido explícito do utilizador
+("estamos a progredir ou regredir? temos um avaliador disso?"):
+  1. Antes, o resumo agregava TODOS os logs de uma vez, sem marcar
+     "antes/depois" de nenhuma mudança — uma média cega sobre dias
+     de commits diferentes escondia se uma peça específica ajudou.
+     Corrigido: cada linha nova de log (agent.py, commit a par deste)
+     grava o commit em produção nessa altura; --por-commit agrega por
+     esse campo. Logs antigos, sem o campo, caem em "desconhecido".
+  2. Antes, os avisos só diziam QUANTAS VEZES dispararam, nunca se a
+     suspeita estava certa — uma taxa de disparo, não de precisão.
+     Corrigido: revisar_avisos.py grava um veredito humano
+     (acerto/falso_positivo) por troca em REVISOES_LOG_FILE; este
+     script cruza por timestamp e reporta a taxa de acerto entre o
+     que já foi revisto.
+
 Uso:
-  python3 ver_diagnostico.py            # resumo agregado
-  python3 ver_diagnostico.py --detalhe  # + lista de trocas com sinal a rever
+  python3 ver_diagnostico.py               # resumo agregado
+  python3 ver_diagnostico.py --detalhe     # + lista de trocas com sinal a rever
+  python3 ver_diagnostico.py --por-commit  # + quebra por commit em produção
 """
 import json
 import os
@@ -89,10 +105,21 @@ def _tem_ferramenta_repetida(chamadas: list[dict]) -> bool:
     return False
 
 
+def _carregar_revisoes() -> dict[float, dict]:
+    """veredito humano por troca, indexado pelo timestamp da conversa
+    — ver revisar_avisos.py. Se a mesma troca for revista mais do que
+    uma vez, fica a mais recente."""
+    revisoes = {}
+    for r in _carregar(config.REVISOES_LOG_FILE):
+        revisoes[r["timestamp"]] = r
+    return revisoes
+
+
 def analisar() -> dict:
     chamadas = _carregar(config.LOG_FILE)
     conversas = _carregar(config.CONVERSATION_LOG_FILE)
     trocas = _agrupar_por_troca(chamadas, conversas)
+    revisoes = _carregar_revisoes()
 
     resumo = {
         "total_trocas": len(trocas),
@@ -107,12 +134,21 @@ def analisar() -> dict:
         "tokens_entrada_totais": 0,
         "tokens_saida_totais": 0,
         "tempo_total_s": 0.0,
-        "problematicas": [],  # só preenchido para --detalhe
+        "revisadas": 0,
+        "acertos": 0,
+        "falsos_positivos": 0,
+        "por_commit": {},  # commit -> {trocas, tokens_entrada, tokens_saida, tempo, avisos, primeiro_timestamp}
+        "problematicas": [],  # texto completo, truncado só ao imprimir
     }
 
     for t in trocas:
-        resposta = t["conversa"]["resposta"]
-        pedido = t["conversa"]["pedido"]
+        conversa = t["conversa"]
+        resposta = conversa["resposta"]
+        pedido = conversa["pedido"]
+        timestamp = conversa["timestamp"]
+        # Logs anteriores a esta peça (16 Ago) não têm "commit" — não
+        # há forma honesta de saber sob que versão correram.
+        commit = conversa.get("commit", "desconhecido")
         chamadas_desta_troca = t["chamadas"]
         tokens_entrada = sum(c.get("prompt_eval_count") or 0 for c in chamadas_desta_troca)
         tokens_saida = sum(c.get("eval_count") or 0 for c in chamadas_desta_troca)
@@ -145,9 +181,31 @@ def analisar() -> dict:
         elif filtro is False:
             resumo["filtro_poupou_tools"] += 1
 
-        if bateu_limite or tem_n1 or tem_n15 or tem_urls or tem_fontes or repetida:
+        por_commit = resumo["por_commit"].setdefault(commit, {
+            "trocas": 0, "tokens_entrada": 0, "tokens_saida": 0,
+            "tempo_s": 0.0, "avisos": 0, "primeiro_timestamp": timestamp,
+        })
+        por_commit["trocas"] += 1
+        por_commit["tokens_entrada"] += tokens_entrada
+        por_commit["tokens_saida"] += tokens_saida
+        por_commit["tempo_s"] += tempo
+        por_commit["primeiro_timestamp"] = min(por_commit["primeiro_timestamp"], timestamp)
+
+        tem_algum_aviso = bateu_limite or tem_n1 or tem_n15 or tem_urls or tem_fontes or repetida
+        if tem_algum_aviso:
+            por_commit["avisos"] += 1
+            revisao = revisoes.get(timestamp)
+            if revisao:
+                resumo["revisadas"] += 1
+                if revisao["veredito"] == "acerto":
+                    resumo["acertos"] += 1
+                elif revisao["veredito"] == "falso_positivo":
+                    resumo["falsos_positivos"] += 1
             resumo["problematicas"].append({
-                "pedido": pedido[:100],
+                "timestamp": timestamp,
+                "commit": commit,
+                "pedido": pedido,
+                "resposta": resposta,
                 "voltas": len(chamadas_desta_troca),
                 "bateu_limite": bateu_limite,
                 "nivel1": tem_n1,
@@ -155,19 +213,20 @@ def analisar() -> dict:
                 "urls": tem_urls,
                 "fontes": tem_fontes,
                 "repetida": repetida,
+                "revisao": revisao["veredito"] if revisao else None,
             })
 
     return resumo
 
 
-def imprimir(resumo: dict, detalhe: bool) -> None:
+def imprimir(resumo: dict, detalhe: bool, por_commit: bool) -> None:
     total = resumo["total_trocas"]
     if total == 0:
         print("[sem trocas com par em conversas.jsonl — nada para analisar ainda]")
         return
 
-    def pct(n: int) -> str:
-        return f"{n}/{total} ({n / total * 100:.0f}%)"
+    def pct(n: int, base: int = total) -> str:
+        return f"{n}/{base} ({n / base * 100:.0f}%)" if base else f"{n}/0 (n/a)"
 
     print(f"=== Diagnóstico de {total} trocas (chamadas.jsonl + conversas.jsonl) ===")
     print(f"Bateram no limite de voltas:          {pct(resumo['bateu_limite_voltas'])}")
@@ -180,8 +239,27 @@ def imprimir(resumo: dict, detalhe: bool) -> None:
     print(f"Filtro TOOL_DEFS poupou (sem tools):  {pct(resumo['filtro_poupou_tools'])}")
     print(f"Tokens de entrada somados:            {resumo['tokens_entrada_totais']}")
     print(f"Tokens de saída somados:              {resumo['tokens_saida_totais']}")
-    if total:
-        print(f"Tempo médio por troca:                {resumo['tempo_total_s'] / total:.1f}s")
+    print(f"Tempo médio por troca:                {resumo['tempo_total_s'] / total:.1f}s")
+
+    n_problematicas = len(resumo["problematicas"])
+    print(f"\nRevistas manualmente (veredito humano): {pct(resumo['revisadas'], n_problematicas)} das trocas com aviso")
+    if resumo["revisadas"]:
+        print(f"  — dos revistos: {pct(resumo['acertos'], resumo['revisadas'])} acertos, "
+              f"{pct(resumo['falsos_positivos'], resumo['revisadas'])} falsos positivos")
+        print("  (corre 'python3 revisar_avisos.py' para reveres mais)")
+    elif n_problematicas:
+        print(f"  — nenhuma das {n_problematicas} trocas com aviso foi revista ainda; "
+              "corre 'python3 revisar_avisos.py'")
+
+    if por_commit and resumo["por_commit"]:
+        print("\n=== Por commit em produção (ordenado por 1ª troca vista) ===")
+        linhas = sorted(resumo["por_commit"].items(), key=lambda kv: kv[1]["primeiro_timestamp"])
+        for commit, d in linhas:
+            tokens_medios = d["tokens_entrada"] / d["trocas"]
+            tempo_medio = d["tempo_s"] / d["trocas"] if d["trocas"] else 0
+            print(f"  {commit:<14} {d['trocas']:>4} trocas | "
+                  f"{pct(d['avisos'], d['trocas'])} c/ aviso | "
+                  f"{tokens_medios:>7.0f} tokens entrada/troca | {tempo_medio:>5.1f}s/troca")
 
     if detalhe and resumo["problematicas"]:
         print(f"\n=== {len(resumo['problematicas'])} trocas com algum sinal a rever ===")
@@ -199,8 +277,9 @@ def imprimir(resumo: dict, detalhe: bool) -> None:
                 marcas.append("FONTES")
             if p["repetida"]:
                 marcas.append("REPETIU")
-            print(f"[{','.join(marcas):<20}] ({p['voltas']} voltas) {p['pedido']!r}")
+            revisao = f" [{p['revisao']}]" if p["revisao"] else ""
+            print(f"[{','.join(marcas):<20}]{revisao} ({p['voltas']} voltas) {p['pedido'][:100]!r}")
 
 
 if __name__ == "__main__":
-    imprimir(analisar(), detalhe="--detalhe" in sys.argv)
+    imprimir(analisar(), detalhe="--detalhe" in sys.argv, por_commit="--por-commit" in sys.argv)

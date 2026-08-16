@@ -204,6 +204,15 @@ LOG_FILE = os.path.join(BASE_DIR, "logs", "chamadas.jsonl")
 # .gitignore (logs/*.jsonl já cobre qualquer ficheiro novo aqui).
 CONVERSATION_LOG_FILE = os.path.join(BASE_DIR, "logs", "conversas.jsonl")
 
+# Anotação manual (16 Ago 2026, ver HISTORICO.md) — veredito humano
+# ("acerto"/"falso_positivo") sobre trocas que dispararam algum aviso
+# mecânico, gravado por revisar_avisos.py e lido por ver_diagnostico.py.
+# Fecha o gap "sabemos que dispara, não se acerta": os avisos por si só
+# nunca dizem se a suspeita estava certa, só um humano a rever o texto
+# real sabe isso. Ficheiro à parte de propósito (mesmo padrão do
+# CONVERSATION_LOG_FILE) — é anotação sobre a conversa, não a conversa.
+REVISOES_LOG_FILE = os.path.join(BASE_DIR, "logs", "revisoes.jsonl")
+
 # --- Núcleo mínimo (Grupo A — sempre presente em todos os pedidos) ------
 # Curto de propósito. Tudo o resto (memória, skills, conhecimento) é
 # recuperado por pedido, nunca carregado por defeito.
