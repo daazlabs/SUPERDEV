@@ -99,10 +99,14 @@ def analisar() -> dict:
         "bateu_limite_voltas": 0,
         "aviso_nivel1": 0,
         "aviso_nivel1_5": 0,
+        "aviso_urls": 0,
+        "aviso_fontes_nomeadas": 0,
         "ferramenta_repetida": 0,
         "filtro_anexou_tools": 0,
         "filtro_poupou_tools": 0,
-        "tokens_totais": 0,
+        "tokens_entrada_totais": 0,
+        "tokens_saida_totais": 0,
+        "tempo_total_s": 0.0,
         "problematicas": [],  # só preenchido para --detalhe
     }
 
@@ -110,12 +114,20 @@ def analisar() -> dict:
         resposta = t["conversa"]["resposta"]
         pedido = t["conversa"]["pedido"]
         chamadas_desta_troca = t["chamadas"]
-        tokens = sum(c.get("prompt_eval_count") or 0 for c in chamadas_desta_troca)
-        resumo["tokens_totais"] += tokens
+        tokens_entrada = sum(c.get("prompt_eval_count") or 0 for c in chamadas_desta_troca)
+        tokens_saida = sum(c.get("eval_count") or 0 for c in chamadas_desta_troca)
+        tempo = sum(c.get("tempo_medido_end_to_end_s") or 0 for c in chamadas_desta_troca)
+        resumo["tokens_entrada_totais"] += tokens_entrada
+        resumo["tokens_saida_totais"] += tokens_saida
+        resumo["tempo_total_s"] += tempo
 
         bateu_limite = "atingi o limite de voltas" in resposta
         tem_n1 = "verificação automática de constantes citadas" in resposta
         tem_n15 = "Nível 1.5" in resposta
+        # Avisos de 13/16 Ago (ver HISTORICO.md) — não entravam ainda
+        # neste resumo, ficava-se cego a eles a partir de agora.
+        tem_urls = "aviso de URLs não confirmados" in resposta
+        tem_fontes = "aviso de fontes não confirmadas" in resposta
         repetida = _tem_ferramenta_repetida(chamadas_desta_troca)
         # filtro do TOOL_DEFS (13 Ago) só existe nas trocas de hoje em
         # diante — trocas mais antigas não têm este campo (None),
@@ -125,19 +137,23 @@ def analisar() -> dict:
         resumo["bateu_limite_voltas"] += int(bateu_limite)
         resumo["aviso_nivel1"] += int(tem_n1)
         resumo["aviso_nivel1_5"] += int(tem_n15)
+        resumo["aviso_urls"] += int(tem_urls)
+        resumo["aviso_fontes_nomeadas"] += int(tem_fontes)
         resumo["ferramenta_repetida"] += int(repetida)
         if filtro is True:
             resumo["filtro_anexou_tools"] += 1
         elif filtro is False:
             resumo["filtro_poupou_tools"] += 1
 
-        if bateu_limite or tem_n1 or tem_n15 or repetida:
+        if bateu_limite or tem_n1 or tem_n15 or tem_urls or tem_fontes or repetida:
             resumo["problematicas"].append({
                 "pedido": pedido[:100],
                 "voltas": len(chamadas_desta_troca),
                 "bateu_limite": bateu_limite,
                 "nivel1": tem_n1,
                 "nivel1_5": tem_n15,
+                "urls": tem_urls,
+                "fontes": tem_fontes,
                 "repetida": repetida,
             })
 
@@ -157,10 +173,15 @@ def imprimir(resumo: dict, detalhe: bool) -> None:
     print(f"Bateram no limite de voltas:          {pct(resumo['bateu_limite_voltas'])}")
     print(f"Aviso Nível 1 (números/constantes):   {pct(resumo['aviso_nivel1'])}")
     print(f"Aviso Nível 1.5 (fundamento zero):    {pct(resumo['aviso_nivel1_5'])}")
+    print(f"Aviso URLs não confirmados:           {pct(resumo['aviso_urls'])}")
+    print(f"Aviso fontes nomeadas não confirmadas: {pct(resumo['aviso_fontes_nomeadas'])}")
     print(f"Repetiram alguma ferramenta na troca: {pct(resumo['ferramenta_repetida'])}")
     print(f"Filtro TOOL_DEFS anexou ferramentas:  {pct(resumo['filtro_anexou_tools'])}")
     print(f"Filtro TOOL_DEFS poupou (sem tools):  {pct(resumo['filtro_poupou_tools'])}")
-    print(f"Tokens de prompt somados:             {resumo['tokens_totais']}")
+    print(f"Tokens de entrada somados:            {resumo['tokens_entrada_totais']}")
+    print(f"Tokens de saída somados:              {resumo['tokens_saida_totais']}")
+    if total:
+        print(f"Tempo médio por troca:                {resumo['tempo_total_s'] / total:.1f}s")
 
     if detalhe and resumo["problematicas"]:
         print(f"\n=== {len(resumo['problematicas'])} trocas com algum sinal a rever ===")
@@ -172,6 +193,10 @@ def imprimir(resumo: dict, detalhe: bool) -> None:
                 marcas.append("N1")
             if p["nivel1_5"]:
                 marcas.append("N1.5")
+            if p["urls"]:
+                marcas.append("URLS")
+            if p["fontes"]:
+                marcas.append("FONTES")
             if p["repetida"]:
                 marcas.append("REPETIU")
             print(f"[{','.join(marcas):<20}] ({p['voltas']} voltas) {p['pedido']!r}")
