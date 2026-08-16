@@ -592,6 +592,106 @@ def _verificar_ficheiros_citados(resposta: str, mensagens: list) -> str:
     return resposta + aviso
 
 
+# Verificação de existência contraditada por listar_ficheiros (16 Ago
+# 2026, ver HISTORICO.md) — 2º incidente real da mesma sessão do
+# utilizador, DIFERENTE do anterior: aqui o modelo chamou mesmo
+# listar_ficheiros (confirmado: resultado real, sem "utils.py" nem
+# "memoria.py", testado directamente contra a ferramenta — não é bug
+# das ferramentas), e MESMO ASSIM respondeu "Sim, existem!" a "utils.py
+# e memoria.py existem mesmo?". A verificação anterior
+# (_verificar_ficheiros_citados) não apanha isto: não há um bloco
+# descritivo "**nome.ext** (N caracteres):" a citar esses 2 nomes na
+# própria resposta — a resposta nem sequer os repete, só confirma em
+# prosa vaga ("Sim, existem!") o que o utilizador tinha perguntado.
+#
+# Mais próximo do "Nível 2" discutido com o utilizador (verificar o
+# CONTEÚDO de uma afirmação contra o resultado real de uma ferramenta,
+# não só se a ferramenta foi chamada) — mas continua mecânico e
+# barato: listar_ficheiros devolve uma lista de nomes em texto simples,
+# por isso "o nome está literalmente na última listagem desta troca?"
+# é uma verificação de substring, não semântica a sério.
+#
+# Cuidado deliberado com negação: "X não existe" é uma afirmação
+# CORRECTA de ausência, não deve disparar — só "X existe"/"existem"
+# sem "não" a preceder é que é uma afirmação de presença a confirmar.
+_FRASES_AFIRMA_EXISTENCIA = ("existe", "existem", "está na lista", "estão na lista")
+_PADRAO_NOME_FICHEIRO = re.compile(
+    r"\b[\w\-]+\.(?:py|md|txt|json|jsonl|toml|cfg|ini|sh|yml|yaml|env)\b"
+)
+
+
+def _tem_negacao_antes(frase_min: str, pos: int) -> bool:
+    """'não' na janela curta imediatamente antes de pos — para não
+    confundir 'X não existe' (correcto) com 'X existe' (o que esta
+    verificação quer confirmar)."""
+    return "não" in frase_min[max(0, pos - 15):pos]
+
+
+def _resultados_por_ferramenta(mensagens: list, nome_ferramenta: str) -> list[str]:
+    """Resultados (conteúdo) de todas as chamadas a uma ferramenta
+    específica nesta troca, na ordem em que aconteceram — casa cada
+    tool_call de uma mensagem assistant com as mensagens tool
+    seguintes (protocolo padrão: N tool_calls seguidos de N respostas
+    tool, pela mesma ordem — não há campo 'name' na mensagem tool que
+    diga directamente qual ferramenta respondeu)."""
+    resultados = []
+    for i, m in enumerate(mensagens):
+        if m.get("role") != "assistant":
+            continue
+        chamadas = m.get("tool_calls") or []
+        seguintes = [x for x in mensagens[i + 1:i + 1 + len(chamadas)] if x.get("role") == "tool"]
+        for chamada, resposta_tool in zip(chamadas, seguintes):
+            if chamada["function"]["name"] == nome_ferramenta:
+                resultados.append(resposta_tool.get("content") or "")
+    return resultados
+
+
+def _verificar_existencia_ficheiros(resposta: str, mensagens: list) -> str:
+    """Se a resposta afirma que um ficheiro existe/está na lista, e
+    listar_ficheiros foi mesmo chamado nesta troca, confere se o nome
+    aparece de facto na última listagem real — sem isto, é uma
+    contradição directa do próprio resultado que o modelo leu."""
+    listagens = _resultados_por_ferramenta(mensagens, "listar_ficheiros")
+    if not listagens:
+        return resposta
+    ultima_listagem = listagens[-1]
+
+    # Nomes da última pergunta do utilizador nesta troca — uma
+    # afirmação vaga ("Sim, existem!") confirma implicitamente os
+    # nomes que o utilizador tinha acabado de perguntar, mesmo que a
+    # resposta não os repita — foi exactamente o caso real.
+    pedido_utilizador = next(
+        (m["content"] for m in reversed(mensagens) if m.get("role") == "user" and m.get("content")),
+        "",
+    )
+    nomes_do_pedido = set(_PADRAO_NOME_FICHEIRO.findall(pedido_utilizador))
+
+    afirmados_ausentes = set()
+    for frase in re.split(r"(?<=[.!?])\s+", resposta):
+        frase_min = frase.lower()
+        tem_afirmacao = any(
+            f in frase_min and not _tem_negacao_antes(frase_min, frase_min.index(f))
+            for f in _FRASES_AFIRMA_EXISTENCIA
+        )
+        if not tem_afirmacao:
+            continue
+        nomes_na_frase = set(_PADRAO_NOME_FICHEIRO.findall(frase)) or nomes_do_pedido
+        for nome in nomes_na_frase:
+            if nome not in ultima_listagem:
+                afirmados_ausentes.add(nome)
+
+    if not afirmados_ausentes:
+        return resposta
+
+    aviso = (
+        "\n\n---\n[SUPERDEV — aviso de existência contraditada]\n"
+        "⚠️ Estes ficheiros são afirmados como existentes, mas NÃO "
+        "aparecem no resultado real do último listar_ficheiros desta "
+        "troca — contradição directa: " + "; ".join(sorted(afirmados_ausentes))
+    )
+    return resposta + aviso
+
+
 def build_system_prompt(pedido: str, tenant_id: str | None = None):
     tenant_id = tenant_id or config.TENANT_PADRAO
     partes = [config.CORE_IDENTITY]
@@ -973,6 +1073,13 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
         # descritos em detalhe, nenhum dos dois existe, nenhuma
         # ferramenta chamada nesta troca.
         resposta = _verificar_ficheiros_citados(resposta, mensagens)
+        # Verificação de existência contraditada por listar_ficheiros
+        # (16 Ago 2026) — 2º incidente da mesma sessão: desta vez
+        # listar_ficheiros FOI chamado, devolveu a lista real (sem
+        # "utils.py"/"memoria.py"), e a resposta disse "Sim, existem!"
+        # mesmo assim — contradiz o próprio resultado, não falta de
+        # fundamento nenhuma.
+        resposta = _verificar_existencia_ficheiros(resposta, mensagens)
 
     # Fase de testes (9 Ago 2026, a pedido do utilizador): grava a
     # conversa real (pergunta+resposta), não só métricas — para o
