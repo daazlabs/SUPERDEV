@@ -416,6 +416,100 @@ def _verificar_urls_citados(resposta: str, mensagens: list) -> str:
     return resposta + aviso
 
 
+# Verificação de fontes nomeadas citadas em prosa, sem URL (16 Ago
+# 2026, ver HISTORICO.md) — extensão directa de
+# _verificar_urls_citados para o caso adjacente: uma fonte citada por
+# NOME ("segundo a CMVM...", "de acordo com o Fórum X...") sem link
+# nenhum a acompanhar. O incidente real de 13 Ago (fórum/banco/CMVM
+# inventados) já ficou coberto pelo caso COM URL — isto fecha a
+# versão sem URL do mesmo padrão. Ainda por reproduzir ao vivo; ver a
+# conversa com o utilizador (16 Ago) sobre a distinção entre invenção
+# ESTRUTURADA (um nome/sigla concreto citado como prova — isto
+# apanha) e invenção DIFUSA em prosa livre (cor narrativa sem nada
+# concreto agarrado — nenhuma verificação mecânica alcança isso; fica
+# para a auditoria por amostragem do Nível 2, não decidida ainda).
+#
+# Só actua dentro de frases com uma pista de citação explícita
+# (_PISTAS_CITACAO) — sem isso, qualquer nome próprio em maiúsculas
+# dispararia constantemente (nomes de pessoas, países, o próprio
+# projecto), ruído sem sinal nenhum, mesmo problema que motivou o
+# âmbito estreito do Nível 1.5. Dentro dessas frases, só conta nomes
+# de 2+ palavras com maiúscula inicial (ligações de/da/do/dos/das/e
+# permitidas no meio, ex. "Banco de Portugal") ou siglas de 2-6
+# letras (ex. "CMVM", "INE", "BCE") — um nome de 1 palavra só é
+# ambíguo demais para confirmar ou negar com segurança.
+_PISTAS_CITACAO = (
+    "segundo", "de acordo com", "conforme", "fonte:", "publicado por",
+    "relatório da", "relatório do", "comunicado da", "comunicado do",
+    "no site da", "no site do", "site oficial",
+) + _CATEGORIAS_FUNDAMENTO["web"]["palavras_chave"]
+
+_PADRAO_SIGLA = re.compile(r"\b[A-Z]{2,6}\b")
+_PADRAO_NOME_PROPRIO = re.compile(
+    r"\b[A-ZÀ-Ý][a-zà-ÿ]+(?:\s+(?:de|da|do|dos|das|e)\s+[A-ZÀ-Ý][a-zà-ÿ]+"
+    r"|\s+[A-ZÀ-Ý][a-zà-ÿ]+){1,3}\b"
+)
+# Palavras soltas das próprias pistas de citação (_PISTAS_CITACAO) —
+# só as conectoras curtas, não as frases-chave do Nível 1.5 (essas são
+# nomes de produto/site reais como "chatgpt"/"reddit", não ruído).
+# Achado ao testar: "Segundo Portugal, ..." capturava "Segundo
+# Portugal" como um nome próprio de 2 palavras só porque o conector
+# em início de frase vem com maiúscula — sem isto, o próprio gatilho
+# contaminava o que estava a tentar extrair.
+_PALAVRAS_PISTA_CONECTORAS = {
+    "segundo", "de", "acordo", "com", "conforme", "fonte", "publicado",
+    "por", "relatório", "da", "do", "comunicado", "no", "site", "oficial",
+}
+
+
+def _fontes_citadas(frase: str) -> set[str]:
+    """Siglas + nomes próprios de 2+ palavras encontrados numa frase,
+    com as palavras de ligação das pistas de citação removidas das
+    pontas do nome (ver _PALAVRAS_PISTA_CONECTORAS) — o que sobrar com
+    menos de 2 palavras é ambíguo demais e é descartado, mesmo âmbito
+    deliberado do resto desta verificação."""
+    encontradas = set(_PADRAO_SIGLA.findall(frase))
+    for candidato in _PADRAO_NOME_PROPRIO.findall(frase):
+        palavras = candidato.split()
+        while palavras and palavras[0].lower() in _PALAVRAS_PISTA_CONECTORAS:
+            palavras.pop(0)
+        while palavras and palavras[-1].lower() in _PALAVRAS_PISTA_CONECTORAS:
+            palavras.pop()
+        if len(palavras) >= 2:
+            encontradas.add(" ".join(palavras))
+    return encontradas
+
+
+def _verificar_fontes_nomeadas(resposta: str, mensagens: list) -> str:
+    """Para cada frase que cita uma fonte externa por nome (pista em
+    _PISTAS_CITACAO), confere se o nome citado aparece no texto das
+    ferramentas/utilizador desta troca — mesmo princípio do
+    _verificar_urls_citados, só sem exigir um link."""
+    texto_fontes = "\n".join(
+        m.get("content") or "" for m in mensagens if m.get("role") in ("tool", "user", "system")
+    )
+
+    nao_confirmadas = set()
+    for frase in re.split(r"(?<=[.!?])\s+", resposta):
+        frase_min = frase.lower()
+        if not any(pista in frase_min for pista in _PISTAS_CITACAO):
+            continue
+        for nome in _fontes_citadas(frase):
+            if nome not in texto_fontes:
+                nao_confirmadas.add(nome)
+
+    if not nao_confirmadas:
+        return resposta
+
+    aviso = (
+        "\n\n---\n[SUPERDEV — aviso de fontes não confirmadas]\n"
+        "⚠️ Estes nomes são citados como fonte, mas não aparecem em "
+        "nenhum resultado de ferramenta nem em nada que escreveste "
+        "nesta troca — podem estar inventados: " + "; ".join(sorted(nao_confirmadas))
+    )
+    return resposta + aviso
+
+
 def build_system_prompt(pedido: str, tenant_id: str | None = None):
     tenant_id = tenant_id or config.TENANT_PADRAO
     partes = [config.CORE_IDENTITY]
@@ -788,6 +882,10 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
         # Verificação de URLs (13 Ago 2026) — apanha "pesquisou mas
         # inventou por cima", que o Nível 1.5 sozinho não cobre.
         resposta = _verificar_urls_citados(resposta, mensagens)
+        # Verificação de fontes nomeadas sem URL (16 Ago 2026) — mesma
+        # ideia da linha acima, para quando a fonte inventada é citada
+        # só pelo nome ("segundo a CMVM..."), sem link a acompanhar.
+        resposta = _verificar_fontes_nomeadas(resposta, mensagens)
 
     # Fase de testes (9 Ago 2026, a pedido do utilizador): grava a
     # conversa real (pergunta+resposta), não só métricas — para o
