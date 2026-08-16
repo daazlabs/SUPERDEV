@@ -529,6 +529,69 @@ def _verificar_fontes_nomeadas(resposta: str, mensagens: list) -> str:
     return resposta + aviso
 
 
+# Verificação de ficheiros citados sem terem sido lidos/listados (16
+# Ago 2026, ver HISTORICO.md) — incidente real ao vivo, apanhado pelo
+# utilizador na sua própria conversa: um pedido trivial de continuação
+# ("sim") gerou uma resposta a descrever "utils.py" e "memoria.py" —
+# nome de função a função, contagem de caracteres incluída — quando
+# NENHUM dos dois ficheiros existe no projecto (é "memory.py", nem o
+# nome bateu certo) e SEM CHAMAR NENHUMA FERRAMENTA nesta troca.
+#
+# Nenhum nível anterior apanha isto: sem URL, sem "segundo..."/fonte
+# nomeada, sem a linguagem estreita de _CATEGORIAS_FUNDAMENTO ("li o
+# ficheiro"/"o ficheiro contém" — a resposta real dizia só "Contém
+# funções utilitárias gerais", nunca essas frases exactas). É
+# precisamente a "invenção difusa em prosa livre" que o Nível 1 já
+# assumia, desde o início, estar fora do alcance de qualquer
+# verificação mecânica — confirmado ao vivo nesta troca real.
+#
+# Âmbito estreito, mesmo espírito do resto: só actua no padrão exacto
+# do incidente — um nome de ficheiro (extensão reconhecida) citado
+# como um bloco descritivo ("**nome.ext** (N caracteres):" ou
+# "**nome.ext**:"), não qualquer menção casual do nome dentro de uma
+# frase corrida. Confirma se esse nome apareceu nesta troca nalgum
+# resultado de ferramenta, no que o utilizador escreveu, ou nos
+# próprios argumentos de uma chamada de ferramenta feita pelo modelo
+# — um ficheiro que ele tentou ler, mesmo que o resultado ainda não
+# tenha chegado ou tenha dado erro, não é invenção, é uma tentativa
+# real.
+_PADRAO_FICHEIRO_DESCRITO = re.compile(
+    r"[`*]*\b([\w\-./]+\.(?:py|md|txt|json|jsonl|toml|cfg|ini|sh|yml|yaml|env))\b[`*]*\s*[:(]"
+)
+
+
+def _verificar_ficheiros_citados(resposta: str, mensagens: list) -> str:
+    """Cada ficheiro citado como um bloco descritivo (nome + resumo do
+    que faz) tem de ter sido realmente tocado nesta troca — lido,
+    listado, ou pelo menos tentado — senão não há forma honesta de o
+    modelo saber o que lá está."""
+    citados = set(_PADRAO_FICHEIRO_DESCRITO.findall(resposta))
+    if not citados:
+        return resposta
+
+    texto_fontes = "\n".join(
+        m.get("content") or "" for m in mensagens if m.get("role") in ("tool", "user", "system")
+    )
+    for m in mensagens:
+        if m.get("role") == "assistant":
+            for tc in (m.get("tool_calls") or []):
+                texto_fontes += "\n" + json.dumps(
+                    tc.get("function", {}).get("arguments", {}), ensure_ascii=False
+                )
+
+    nao_confirmados = sorted(nome for nome in citados if nome not in texto_fontes)
+    if not nao_confirmados:
+        return resposta
+
+    aviso = (
+        "\n\n---\n[SUPERDEV — aviso de ficheiros não confirmados]\n"
+        "⚠️ Estes ficheiros são descritos como se tivessem sido lidos, "
+        "mas nunca foram tocados por nenhuma ferramenta nesta troca — "
+        "podem estar inventados: " + "; ".join(nao_confirmados)
+    )
+    return resposta + aviso
+
+
 def build_system_prompt(pedido: str, tenant_id: str | None = None):
     tenant_id = tenant_id or config.TENANT_PADRAO
     partes = [config.CORE_IDENTITY]
@@ -905,6 +968,11 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
         # ideia da linha acima, para quando a fonte inventada é citada
         # só pelo nome ("segundo a CMVM..."), sem link a acompanhar.
         resposta = _verificar_fontes_nomeadas(resposta, mensagens)
+        # Verificação de ficheiros citados sem serem lidos (16 Ago
+        # 2026) — incidente real ao vivo: "utils.py"/"memoria.py"
+        # descritos em detalhe, nenhum dos dois existe, nenhuma
+        # ferramenta chamada nesta troca.
+        resposta = _verificar_ficheiros_citados(resposta, mensagens)
 
     # Fase de testes (9 Ago 2026, a pedido do utilizador): grava a
     # conversa real (pergunta+resposta), não só métricas — para o
