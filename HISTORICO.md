@@ -2367,3 +2367,19 @@ SUPERLLMAPI a sério contra uma API real, não em teste sintético —
 confirma exactamente a razão de o utilizador ter pedido testes reais
 ("dá para testar e perceber como funciona, e ver se erra") em vez de
 só construir por cima sem verificar ao vivo.
+
+## Renomeado SUPERDEV → SUPERLLMLOCAL (17 Ago 2026)
+
+A par da criação do repo irmão SUPERLLMAPI (`/mnt/sovereign/superllmapi`,
+mesmo dia): o nome "SUPERDEV" foi escolhido pelo papel do agente
+(especialista em programação), não pela arquitectura — com o
+SUPERLLMAPI a existir agora como par para modelos de API paga, o nome
+antigo deixava o par assimétrico (um nomeado por função, outro por
+infra-estrutura). Renomeado para SUPERLLMLOCAL: pasta
+(`/mnt/sovereign/superdev` → `/mnt/sovereign/superllmlocal`), repo
+GitHub, serviço systemd (`superdev-server` → `superllmlocal-server`),
+comando de terminal (`superdev` → `superllmlocal`), e todas as strings
+de identidade no código (CORE_IDENTITY, avisos de verificacoes.py,
+User-Agent, banners). As entradas anteriores deste ficheiro NÃO foram
+reescritas — usavam o nome antigo porque era esse o nome nessa altura,
+mantém-se histórico e correcto assim.

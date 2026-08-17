@@ -69,7 +69,7 @@ SANDBOX DE CAMINHOS (11 Ago 2026) — toda a ferramenta que toca no
 disco valida o caminho contra config.RAIZES_PERMITIDAS antes de o
 abrir (ver _validar_caminho abaixo e a nota em config.py para o
 porquê). Testado primeiro no protótipo
-`/mnt/sovereign/superllmlocalsandbox/` (sandbox do CodeAct) — o mesmo
+`/mnt/sovereign/superdevsandbox/` (sandbox do CodeAct) — o mesmo
 padrão trazido para aqui depois de confirmado a funcionar lá.
 Alargado no mesmo dia de "só a pasta do SUPERLLMLOCAL" para uma lista de
 pastas de trabalho reais (decisão explícita do utilizador, editável
@@ -97,7 +97,7 @@ def _validar_caminho(caminho: str) -> str | None:
     (incluindo tentativas de fuga com `..`) — chamado no início de
     toda função que toca no disco, antes de qualquer
     os.path.isfile/isdir/walk. Mesmo princípio do protótipo
-    superllmlocalsandbox/ferramentas.py (lá testado com tentativas de fuga
+    superdevsandbox/ferramentas.py (lá testado com tentativas de fuga
     a sério), agora com várias raízes em vez de uma só."""
     absoluto = os.path.abspath(os.path.expanduser(caminho))
     for raiz_bruta in config.RAIZES_PERMITIDAS:

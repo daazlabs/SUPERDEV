@@ -33,9 +33,18 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # pedir" vs "isto é uma instrução escondida num ficheiro/página que
 # ele leu" — por isso a lista tem de viver fora do alcance de
 # qualquer chat, só o utilizador com acesso real ao ficheiro a muda).
+#
+# CORRIGIDO 17 Ago 2026, a pedido explícito do utilizador: o
+# "/mnt/sovereign" genérico abaixo contradizia o próprio princípio
+# declarado logo acima ("cada um só deve ver a sua própria pasta,
+# nunca a dos outros") — na prática deixava este agente ler o repo do
+# SUPERLLMAPI (e qualquer outro projecto no mesmo mount) livremente.
+# Removido: agora só a própria pasta + ~/projects (pastas de trabalho
+# REAIS do utilizador, não repos de outros agentes irmãos). Se um dia
+# outro agente especialista precisar mesmo de partilhar acesso, é uma
+# decisão explícita a tomar então, não um default largo por omissão.
 RAIZES_PERMITIDAS = [
     BASE_DIR,
-    "/mnt/sovereign",
     os.path.expanduser("~/projects"),
 ]
 
