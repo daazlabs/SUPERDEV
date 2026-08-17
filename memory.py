@@ -46,7 +46,26 @@ def _sobreposicao(query_palavras: set, texto: str) -> float:
     return len(query_palavras & texto_palavras) / len(query_palavras)
 
 
+# 17 Ago 2026 — bug real apanhado a testar correcções do SUPERLEADS:
+# um pedido com ~5657+ caracteres faz o Ollama devolver 500 (não um
+# erro limpo) no endpoint de embeddings — quase de certeza o contexto
+# do modelo de embeddings (nomic-embed-text) a ser excedido, mas sem
+# nenhuma mensagem útil do lado do Ollama para confirmar a causa
+# exacta. Reproduzido de forma determinística por bissecção de
+# comprimento (ver HISTORICO.md) — não é intermitente, é sempre que o
+# texto passa este tamanho. Isto rebentava build_system_prompt() por
+# inteiro (nenhuma ferramenta chegava sequer a correr) sempre que um
+# agente qualquer (SUPERLEADS incluído, depois de um prompt de sector
+# ficar mais longo) mandasse um pedido comprido. _embed() só serve
+# para RECUPERAR memórias semelhantes — não precisa do texto inteiro,
+# um excerto já dá sinal suficiente. Cortar aqui, mesmo princípio de
+# "nunca rebentar, corta com aviso" já usado em tools.ler_ficheiro.
+LIMITE_CARACTERES_EMBED = 2000
+
+
 def _embed(texto: str) -> list:
+    if len(texto) > LIMITE_CARACTERES_EMBED:
+        texto = texto[:LIMITE_CARACTERES_EMBED]
     body = json.dumps({"model": config.EMBED_MODEL, "prompt": texto}).encode()
     req = urllib.request.Request(
         f"{config.OLLAMA_HOST}/api/embeddings",
