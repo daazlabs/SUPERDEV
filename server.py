@@ -1,7 +1,7 @@
 """
 Servidor HTTP compatível com a API da OpenAI (/v1/chat/completions,
 /v1/models) — a "tomada adaptadora" para ligar interfaces de chat
-prontas (Open WebUI, etc.) ao SUPERDEV sem alterar nada do agente.
+prontas (Open WebUI, etc.) ao SUPERLLMLOCAL sem alterar nada do agente.
 
 ESTE FICHEIRO NÃO MEXE em agent.py/tools.py/config.py/pgmemory.py —
 só importa `agent` e usa `agent.responder()`, exactamente como
@@ -11,13 +11,13 @@ independentes da mesma lógica.
 
 DECISÃO DE DESENHO — sessão única, ignora o histórico que o cliente
 envia (9 Ago 2026): a API da OpenAI é "sem estado": o cliente
-reenvia a conversa toda a cada pedido. O SUPERDEV já tem a sua
+reenvia a conversa toda a cada pedido. O SUPERLLMLOCAL já tem a sua
 própria gestão de memória (janela curta + destilação para longo
 prazo em pgmemory, ver agent.nova_sessao). Para não ter duas fontes
 de verdade a competir, este servidor usa só a ÚLTIMA mensagem do
 utilizador como pedido, e mantém UMA sessão persistente própria
 (SESSAO) durante todo o tempo de vida do processo — mesmo que abras
-uma "New Chat" no Open WebUI, a memória de longo prazo do SUPERDEV
+uma "New Chat" no Open WebUI, a memória de longo prazo do SUPERLLMLOCAL
 continua a acumular por baixo. Ferramenta pessoal de um utilizador
 só, não multi-utilizador — não vale a pena mais complexidade que
 isto agora.
@@ -74,7 +74,7 @@ def listar_modelos():
     return {
         "object": "list",
         "data": [
-            {"id": "superdev", "object": "model", "created": 0, "owned_by": "local"}
+            {"id": "superllmlocal", "object": "model", "created": 0, "owned_by": "local"}
         ],
     }
 
@@ -101,14 +101,14 @@ async def chat_completions(request: Request):
     usage = _gastos_desde(pos_antes)
 
     agora = int(time.time())
-    id_resposta = f"superdev-{agora}"
+    id_resposta = f"superllmlocal-{agora}"
 
     if not stream:
         return {
             "id": id_resposta,
             "object": "chat.completion",
             "created": agora,
-            "model": "superdev",
+            "model": "superllmlocal",
             "choices": [
                 {
                     "index": 0,
@@ -124,7 +124,7 @@ async def chat_completions(request: Request):
             "id": id_resposta,
             "object": "chat.completion.chunk",
             "created": agora,
-            "model": "superdev",
+            "model": "superllmlocal",
         }
         abre = {**base, "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]}
         yield f"data: {json.dumps(abre, ensure_ascii=False)}\n\n"
@@ -142,5 +142,5 @@ async def chat_completions(request: Request):
 if __name__ == "__main__":
     import uvicorn
 
-    print(f"SUPERDEV — servidor compatível OpenAI em http://0.0.0.0:{PORTA}/v1")
+    print(f"SUPERLLMLOCAL — servidor compatível OpenAI em http://0.0.0.0:{PORTA}/v1")
     uvicorn.run(app, host="0.0.0.0", port=PORTA)

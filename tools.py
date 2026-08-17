@@ -1,5 +1,5 @@
 """
-Ferramentas do SUPERDEV.
+Ferramentas do SUPERLLMLOCAL.
 
 Usa a API nativa de "tools" da Ollama (não o parâmetro genérico
 "format" — testámos os dois; "format" não restringiu nada, o modelo
@@ -69,9 +69,9 @@ SANDBOX DE CAMINHOS (11 Ago 2026) — toda a ferramenta que toca no
 disco valida o caminho contra config.RAIZES_PERMITIDAS antes de o
 abrir (ver _validar_caminho abaixo e a nota em config.py para o
 porquê). Testado primeiro no protótipo
-`/mnt/sovereign/superdevsandbox/` (sandbox do CodeAct) — o mesmo
+`/mnt/sovereign/superllmlocalsandbox/` (sandbox do CodeAct) — o mesmo
 padrão trazido para aqui depois de confirmado a funcionar lá.
-Alargado no mesmo dia de "só a pasta do SUPERDEV" para uma lista de
+Alargado no mesmo dia de "só a pasta do SUPERLLMLOCAL" para uma lista de
 pastas de trabalho reais (decisão explícita do utilizador, editável
 só em config.py, nunca por chat) + uma 2ª camada: nomes de ficheiro
 sensíveis (.env, chaves SSH, etc.) nunca são lidos mesmo dentro de
@@ -97,7 +97,7 @@ def _validar_caminho(caminho: str) -> str | None:
     (incluindo tentativas de fuga com `..`) — chamado no início de
     toda função que toca no disco, antes de qualquer
     os.path.isfile/isdir/walk. Mesmo princípio do protótipo
-    superdevsandbox/ferramentas.py (lá testado com tentativas de fuga
+    superllmlocalsandbox/ferramentas.py (lá testado com tentativas de fuga
     a sério), agora com várias raízes em vez de uma só."""
     absoluto = os.path.abspath(os.path.expanduser(caminho))
     for raiz_bruta in config.RAIZES_PERMITIDAS:
@@ -385,7 +385,7 @@ def pesquisar_web(query: str) -> str:
     url = f"{config.SEARXNG_HOST}/search?" + urllib.parse.urlencode(
         {"q": query, "format": "json"}
     )
-    req = urllib.request.Request(url, headers={"User-Agent": "SUPERDEV/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "SUPERLLMLOCAL/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=PESQUISA_WEB_TIMEOUT_S) as r:
             dados = json.loads(r.read())

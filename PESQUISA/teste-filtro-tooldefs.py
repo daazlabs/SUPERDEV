@@ -20,11 +20,11 @@ import tools  # noqa: E402
 
 # Mesmos 8 casos do B4 (ver teste-baseline-toolcalling.py) + extras.
 CASOS = [
-    ("ler_ficheiro (B4)", "Lê o ficheiro /mnt/sovereign/superdev/config.py e diz-me quantas linhas tem.", True),
-    ("listar_ficheiros (B4)", "O que há na pasta /mnt/sovereign/superdev/?", True),
-    ("procurar_texto (B4)", "Procura o texto 'OLLAMA_HOST' no ficheiro /mnt/sovereign/superdev/config.py", True),
+    ("ler_ficheiro (B4)", "Lê o ficheiro /mnt/sovereign/superllmlocal/config.py e diz-me quantas linhas tem.", True),
+    ("listar_ficheiros (B4)", "O que há na pasta /mnt/sovereign/superllmlocal/?", True),
+    ("procurar_texto (B4)", "Procura o texto 'OLLAMA_HOST' no ficheiro /mnt/sovereign/superllmlocal/config.py", True),
     ("correr_ruff (B4)", "Verifica se este código Python está bem escrito, usa o linter: def soma(a, b):\n    return a+b", True),
-    ("ler_varios_ficheiros (B4)", "Lê os ficheiros /mnt/sovereign/superdev/config.py e /mnt/sovereign/superdev/agent.py, os dois.", True),
+    ("ler_varios_ficheiros (B4)", "Lê os ficheiros /mnt/sovereign/superllmlocal/config.py e /mnt/sovereign/superllmlocal/agent.py, os dois.", True),
     ("pesquisar_web (B4)", "Pesquisa na web quais são as últimas notícias sobre o modelo Qwen 3.5.", True),
     ("controlo_negativo_1 (B4)", "Quanto é 2+2?", False),
     ("controlo_negativo_2 (B4)", "Explica numa frase o que é uma API REST.", False),

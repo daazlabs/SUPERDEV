@@ -1,5 +1,5 @@
 """
-SUPERDEV — terminal de conversa "bonito", por cima do agent.py.
+SUPERLLMLOCAL — terminal de conversa "bonito", por cima do agent.py.
 
 Ficheiro à parte de propósito (10 Ago 2026), mesmo espírito do
 server.py (ver esse ficheiro): NÃO mexe em agent.py/tools.py/
@@ -21,7 +21,7 @@ sem destaque de markdown (as respostas vêm cheias de **negrito**,
 enquanto o modelo gera a resposta. Isto resolve os dois com o `rich`
 (já estava instalado no /usr/bin/python3, confirmado antes de usar).
 
-Lançado pelo comando `superdev` (ver ~/.local/bin/superdev) — corre de
+Lançado pelo comando `superllmlocal` (ver ~/.local/bin/superllmlocal) — corre de
 qualquer pasta, não precisa de estar dentro deste directório (o script
 usa o caminho absoluto deste ficheiro).
 
@@ -105,7 +105,7 @@ def _ler_pedido(prompt_texto: str) -> str:
 def _banner() -> None:
     console.print(
         Panel(
-            "[bold cyan]SUPERDEV[/] — agente de programação local\n"
+            "[bold cyan]SUPERLLMLOCAL[/] — agente de programação local\n"
             "[dim]Escreve o teu pedido e Enter. Ctrl+C cancela a linha, "
             "Ctrl+D sai.[/]",
             border_style="cyan",
@@ -130,7 +130,7 @@ def main() -> None:
 
         inicio = time.time()
         try:
-            with console.status("[dim]SUPERDEV a pensar...[/]", spinner="dots"):
+            with console.status("[dim]SUPERLLMLOCAL a pensar...[/]", spinner="dots"):
                 resposta = agent.responder(pedido, sessao)
         except KeyboardInterrupt:
             console.print(
@@ -143,7 +143,7 @@ def main() -> None:
         console.print(
             Panel(
                 Markdown(resposta),
-                title=f"[bold cyan]SUPERDEV[/] [dim]· {duracao:.1f}s[/]",
+                title=f"[bold cyan]SUPERLLMLOCAL[/] [dim]· {duracao:.1f}s[/]",
                 title_align="left",
                 border_style="cyan",
             )

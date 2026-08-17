@@ -1,7 +1,7 @@
 """
 Revisão manual dos avisos mecânicos (16 Ago 2026, ver HISTORICO.md) —
 fecha o gap "sabemos que dispara, não se acerta" apontado pelo
-utilizador ao perguntar se o SUPERDEV está a progredir ou regredir.
+utilizador ao perguntar se o SUPERLLMLOCAL está a progredir ou regredir.
 
 ver_diagnostico.py só conta QUANTAS VEZES um aviso disparou — nunca se
 a suspeita estava certa. Um aviso pode disparar sobre uma resposta que

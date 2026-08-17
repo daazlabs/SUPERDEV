@@ -1,5 +1,5 @@
 """
-Rede de verificação mecânica anti-confabulação do SUPERDEV — Nível 1 →
+Rede de verificação mecânica anti-confabulação do SUPERLLMLOCAL — Nível 1 →
 1.5 → URLs → fontes nomeadas → ficheiros citados → existência
 contraditada (10-16 Ago 2026, ver HISTORICO.md para o incidente real
 que motivou cada peça).
@@ -23,7 +23,7 @@ ao módulo (underscore mantido).
 
 Todas têm a mesma forma: `(resposta: str, mensagens: list) -> str` —
 devolvem a resposta tal e qual se nada houver a assinalar, ou a
-resposta com um aviso "[SUPERDEV — ...]" acrescentado no fim. Nunca
+resposta com um aviso "[SUPERLLMLOCAL — ...]" acrescentado no fim. Nunca
 corrigem nem bloqueiam, só tornam a suspeita visível — mesmo princípio
 em todas, repetido em cada docstring.
 
@@ -67,7 +67,7 @@ _PADRAO_CHAVE_DICT = re.compile(
     r"(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|-?\d+(?:\.\d+)?|True|False|None)"
 )
 # Linha de tabela markdown, ex.: "| `num_ctx` | 16384 | ..." — formato
-# muito comum nas respostas do SUPERDEV quando comparam "actual vs.
+# muito comum nas respostas do SUPERLLMLOCAL quando comparam "actual vs.
 # sugerido", confirmado nos logs de hoje.
 _PADRAO_LINHA_TABELA = re.compile(
     r"\|\s*`?([A-Za-z_][A-Za-z0-9_]*)`?\s*\|\s*"
@@ -163,7 +163,7 @@ def verificar_grounding(resposta: str, mensagens: list) -> str:
     if not contradicoes and not nao_confirmadas and not falsas_duvidas:
         return resposta
 
-    aviso = "\n\n---\n[SUPERDEV — verificação automática de constantes citadas]"
+    aviso = "\n\n---\n[SUPERLLMLOCAL — verificação automática de constantes citadas]"
     if contradicoes:
         aviso += "\n⚠️ Contradiz o que li nesta troca: " + "; ".join(contradicoes)
     if falsas_duvidas:
@@ -214,7 +214,7 @@ _CATEGORIAS_FUNDAMENTO = {
         # ler_pagina_web (17 Ago 2026, SUPERLEADS) — mesma categoria:
         # também é fundamento real para afirmações sobre o que "um site
         # diz", só que a partir do conteúdo da página, não do resumo da
-        # pesquisa. Não existe no SUPERDEV (tools.FUNCOES não a tem lá),
+        # pesquisa. Não existe no SUPERLLMLOCAL (tools.FUNCOES não a tem lá),
         # por isso esta entrada não muda nada para ele — só passa a
         # contar como fundamento válido para agentes que a tenham.
         "ferramentas": ("pesquisar_web", "ler_pagina_web"),
@@ -256,7 +256,7 @@ def verificar_fundamento_categorias(resposta: str, mensagens: list) -> str:
         return resposta
 
     aviso = (
-        "\n\n---\n[SUPERDEV — aviso de fundamento (Nível 1.5)]\n"
+        "\n\n---\n[SUPERLLMLOCAL — aviso de fundamento (Nível 1.5)]\n"
         "⚠️ Esta resposta usa linguagem típica de: " + "; ".join(suspeitas) +
         " — mas a ferramenta correspondente nunca foi chamada nesta "
         "troca. Pode estar inventado, não confirmado por nenhuma "
@@ -315,7 +315,7 @@ def verificar_urls_citados(resposta: str, mensagens: list) -> str:
         return resposta
 
     aviso = (
-        "\n\n---\n[SUPERDEV — aviso de URLs não confirmados]\n"
+        "\n\n---\n[SUPERLLMLOCAL — aviso de URLs não confirmados]\n"
         "⚠️ Estes links não aparecem em nenhum resultado de ferramenta "
         "nem em nada que escreveste nesta troca — podem estar "
         "inventados: " + "; ".join(nao_confirmados)
@@ -409,7 +409,7 @@ def verificar_fontes_nomeadas(resposta: str, mensagens: list) -> str:
         return resposta
 
     aviso = (
-        "\n\n---\n[SUPERDEV — aviso de fontes não confirmadas]\n"
+        "\n\n---\n[SUPERLLMLOCAL — aviso de fontes não confirmadas]\n"
         "⚠️ Estes nomes são citados como fonte, mas não aparecem em "
         "nenhum resultado de ferramenta nem em nada que escreveste "
         "nesta troca — podem estar inventados: " + "; ".join(sorted(nao_confirmadas))
@@ -472,7 +472,7 @@ def verificar_ficheiros_citados(resposta: str, mensagens: list) -> str:
         return resposta
 
     aviso = (
-        "\n\n---\n[SUPERDEV — aviso de ficheiros não confirmados]\n"
+        "\n\n---\n[SUPERLLMLOCAL — aviso de ficheiros não confirmados]\n"
         "⚠️ Estes ficheiros são descritos como se tivessem sido lidos, "
         "mas nunca foram tocados por nenhuma ferramenta nesta troca — "
         "podem estar inventados: " + "; ".join(nao_confirmados)
@@ -585,7 +585,7 @@ def verificar_existencia_ficheiros(resposta: str, mensagens: list) -> str:
         return resposta
 
     aviso = (
-        "\n\n---\n[SUPERDEV — aviso de existência contraditada]\n"
+        "\n\n---\n[SUPERLLMLOCAL — aviso de existência contraditada]\n"
         "⚠️ Estes ficheiros são afirmados como existentes, mas NÃO "
         "aparecem no resultado real do último listar_ficheiros desta "
         "troca — contradição directa: " + "; ".join(sorted(afirmados_ausentes))

@@ -26,7 +26,7 @@ def _formatar(d: dict) -> str:
     return (
         f"\n[{hora}]\n"
         f"Tu: {d['pedido']}\n"
-        f"SUPERDEV: {d['resposta']}\n"
+        f"SUPERLLMLOCAL: {d['resposta']}\n"
         f"{'─' * 60}"
     )
 

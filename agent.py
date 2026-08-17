@@ -1,5 +1,5 @@
 """
-SUPERDEV — agente especialista em programação, qwen3.5:9b via Ollama local.
+SUPERLLMLOCAL — agente especialista em programação, qwen3.5:9b via Ollama local.
 
 Ciclo por pedido:
   1. recebe o pedido do utilizador
@@ -285,7 +285,7 @@ def _chamar_ferramenta_com_cache(nome: str, args: dict, cache: dict) -> str:
 
     if se_repeticao:
         return (
-            "[SUPERDEV interno: já chamaste esta ferramenta com estes "
+            "[SUPERLLMLOCAL interno: já chamaste esta ferramenta com estes "
             "mesmos argumentos nesta troca — o resultado é igual ao de "
             "antes, repetir não traz informação nova. Considera tentar "
             "uma ferramenta ou argumento diferente.]\n" + resultado
@@ -450,7 +450,7 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
             mensagens_desta_chamada = mensagens + [{
                 "role": "user",
                 "content": (
-                    "[SUPERDEV interno] Esta é a tua última oportunidade "
+                    "[SUPERLLMLOCAL interno] Esta é a tua última oportunidade "
                     "nesta troca — não tens mais ferramentas disponíveis. "
                     "Responde já com o que já sabes a partir do que leste "
                     "acima. Se faltar algo para responder por completo, "
@@ -468,7 +468,7 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
             resposta = mensagem.get("content", "")
             if ultima_volta and resposta:
                 resposta += (
-                    "\n\n[SUPERDEV: atingi o limite de voltas de "
+                    "\n\n[SUPERLLMLOCAL: atingi o limite de voltas de "
                     "ferramentas nesta troca — a resposta acima usa só o "
                     "que já tinha confirmado até aqui, pode estar "
                     "incompleta.]"
@@ -483,7 +483,7 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
                 # tokens específico — não há mais um 2º tecto artificial
                 # com um valor fixo para citar.
                 resposta += (
-                    "\n\n[SUPERDEV: resposta cortada — enchi a janela de "
+                    "\n\n[SUPERLLMLOCAL: resposta cortada — enchi a janela de "
                     "contexto (num_ctx) antes de terminar. Pede-me para "
                     "continuar, ou torna a pergunta mais específica.]"
                 )
@@ -582,10 +582,10 @@ def main():
     sem ir aos logs — por isso mostrado inline, não só registado."""
     cor = sys.stdout.isatty()
     TU = "\033[33mTu\033[0m" if cor else "Tu"
-    AGENTE = "\033[36mSUPERDEV\033[0m" if cor else "SUPERDEV"
+    AGENTE = "\033[36mSUPERLLMLOCAL\033[0m" if cor else "SUPERLLMLOCAL"
     SEPARADOR = "─" * 60
 
-    print("SUPERDEV — escreve o teu pedido (Ctrl+C para sair)\n")
+    print("SUPERLLMLOCAL — escreve o teu pedido (Ctrl+C para sair)\n")
     sessao = nova_sessao()
     while True:
         try:

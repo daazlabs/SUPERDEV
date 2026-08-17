@@ -1,5 +1,5 @@
 """
-Configuração central do SUPERDEV.
+Configuração central do SUPERLLMLOCAL.
 
 Agente especialista em programação. Fala exclusivamente com o Ollama
 local, sempre o mesmo modelo — sem lógica de fallback para outro
@@ -19,7 +19,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # nenhuma a provar isto (foi revisto por inspecção de código, a pedido
 # explícito do utilizador sobre segurança do motor em si, separado da
 # conversa sobre a sandbox do CodeAct), mas o risco é real e cresce à
-# medida que a visão do projecto avança: SUPERDEV é para ser o motor
+# medida que a visão do projecto avança: SUPERLLMLOCAL é para ser o motor
 # reaproveitado por outros agentes especialistas na mesma máquina
 # (superadvogado, supercontabilista, etc.) — cada um só deve ver a sua
 # própria pasta, nunca a dos outros nem o resto do disco.
@@ -45,7 +45,7 @@ RAIZES_PERMITIDAS = [
 # numa pesquisa web, guardado em memória de longo prazo). Padrões de
 # NOME de ficheiro, não pastas — vale em qualquer sítio dentro de
 # qualquer raiz permitida, incluindo projectos que o utilizador venha
-# a ter (ex.: o próprio db/.env do SUPERDEV, ou o .env de outro
+# a ter (ex.: o próprio db/.env do SUPERLLMLOCAL, ou o .env de outro
 # projecto em ~/projects). Ver tools._nome_sensivel().
 PADROES_FICHEIRO_SENSIVEL = (
     ".env", ".env.*", "*.pem", "*.key",
@@ -225,7 +225,7 @@ REVISOES_LOG_FILE = os.path.join(BASE_DIR, "logs", "revisoes.jsonl")
 # instrução explícita aqui ("respond in European Portuguese"), não
 # depende do resto do texto estar em PT.
 CORE_IDENTITY = (
-    "You are SUPERDEV, an expert programming agent. "
+    "You are SUPERLLMLOCAL, an expert programming agent. "
     "Always respond in European Portuguese (Portugal, not Brazil) — "
     "short, direct answers. "
     "Use only what is in your context — never invent memories or "

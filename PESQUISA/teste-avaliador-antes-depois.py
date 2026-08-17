@@ -71,7 +71,7 @@ def teste_agregacao_por_commit(tmpdir: str) -> bool:
     with open(config.CONVERSATION_LOG_FILE, "w") as f:
         f.writelines(json.dumps(c) + "\n" for c in (
             {"timestamp": 100.0, "commit": "aaa111", "pedido": "pedido limpo 1", "resposta": "resposta normal, sem aviso"},
-            {"timestamp": 200.0, "commit": "aaa111", "pedido": "pedido suspeito", "resposta": "algo com [SUPERDEV — aviso de fundamento (Nível 1.5)]"},
+            {"timestamp": 200.0, "commit": "aaa111", "pedido": "pedido suspeito", "resposta": "algo com [SUPERLLMLOCAL — aviso de fundamento (Nível 1.5)]"},
             {"timestamp": 300.0, "commit": "bbb222", "pedido": "pedido limpo 2", "resposta": "resposta normal, sem aviso"},
         ))
 

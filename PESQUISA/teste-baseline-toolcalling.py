@@ -1,6 +1,6 @@
 """
 B4 — baseline de "schema-correct rate" do tool-calling actual do
-SUPERDEV (qwen3.5:9b via Ollama), método da secção 4.2 do
+SUPERLLMLOCAL (qwen3.5:9b via Ollama), método da secção 4.2 do
 relatorio-mercado.md: por cada pedido que devia gerar UMA chamada de
 ferramenta específica, medir se o modelo (a) chamou a ferramenta certa
 e (b) os argumentos validam contra o schema dela (chaves obrigatórias
@@ -31,7 +31,7 @@ REPETICOES = 5
 RELATORIO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "baseline-schema-correct.md")
 
 SYSTEM = (
-    "You are SUPERDEV, an expert programming agent. "
+    "You are SUPERLLMLOCAL, an expert programming agent. "
     "You have tools available — use one when the request needs it."
 )
 
@@ -41,19 +41,19 @@ SYSTEM = (
 CASOS = [
     {
         "id": "ler_ficheiro",
-        "pergunta": "Lê o ficheiro /mnt/sovereign/superdev/config.py e diz-me quantas linhas tem.",
+        "pergunta": "Lê o ficheiro /mnt/sovereign/superllmlocal/config.py e diz-me quantas linhas tem.",
         "ferramenta_esperada": "ler_ficheiro",
         "chaves_obrigatorias": ["caminho"],
     },
     {
         "id": "listar_ficheiros",
-        "pergunta": "O que há na pasta /mnt/sovereign/superdev/?",
+        "pergunta": "O que há na pasta /mnt/sovereign/superllmlocal/?",
         "ferramenta_esperada": "listar_ficheiros",
         "chaves_obrigatorias": ["caminho"],
     },
     {
         "id": "procurar_texto",
-        "pergunta": "Procura o texto 'OLLAMA_HOST' no ficheiro /mnt/sovereign/superdev/config.py",
+        "pergunta": "Procura o texto 'OLLAMA_HOST' no ficheiro /mnt/sovereign/superllmlocal/config.py",
         "ferramenta_esperada": "procurar_texto",
         "chaves_obrigatorias": ["caminho", "termo"],
     },
@@ -69,8 +69,8 @@ CASOS = [
     {
         "id": "ler_varios_ficheiros",
         "pergunta": (
-            "Lê os ficheiros /mnt/sovereign/superdev/config.py e "
-            "/mnt/sovereign/superdev/agent.py, os dois."
+            "Lê os ficheiros /mnt/sovereign/superllmlocal/config.py e "
+            "/mnt/sovereign/superllmlocal/agent.py, os dois."
         ),
         "ferramenta_esperada": "ler_varios_ficheiros",
         "chaves_obrigatorias": ["caminhos"],

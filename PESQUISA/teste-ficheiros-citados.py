@@ -1,7 +1,7 @@
 """
 Teste da verificação de ficheiros citados sem terem sido lidos (16 Ago
 2026, ver HISTORICO.md) — incidente real apanhado pelo próprio
-utilizador na sua conversa ao vivo com o SUPERDEV, não em teste.
+utilizador na sua conversa ao vivo com o SUPERLLMLOCAL, não em teste.
 
 Um pedido trivial de continuação ("sim") gerou uma resposta a
 descrever "utils.py" e "memoria.py" — nome de função a função,
@@ -48,7 +48,7 @@ def teste_deterministico() -> bool:
         {"role": "system", "content": "system prompt"},
         {"role": "user", "content": "explica o que faz agent.py"},
         {"role": "assistant", "content": "", "tool_calls": [
-            {"function": {"name": "ler_ficheiro", "arguments": {"caminho": "/mnt/sovereign/superdev/agent.py"}}}
+            {"function": {"name": "ler_ficheiro", "arguments": {"caminho": "/mnt/sovereign/superllmlocal/agent.py"}}}
         ]},
         {"role": "tool", "content": "conteúdo real de agent.py aqui"},
     ]
@@ -115,7 +115,7 @@ def teste_regressao_ficheiro_real_lido() -> bool:
         {"role": "user", "content": "explica chat.py e server.py"},
         {"role": "assistant", "content": "", "tool_calls": [
             {"function": {"name": "ler_varios_ficheiros", "arguments": {
-                "caminhos": ["/mnt/sovereign/superdev/chat.py", "/mnt/sovereign/superdev/server.py"]}}}
+                "caminhos": ["/mnt/sovereign/superllmlocal/chat.py", "/mnt/sovereign/superllmlocal/server.py"]}}}
         ]},
         {"role": "tool", "content": "conteúdo real de chat.py e server.py aqui"},
     ]

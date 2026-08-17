@@ -72,7 +72,7 @@ def correr():
     print(f"{'OK' if not disparou_2 else 'FALHOU'} — aviso presente: {disparou_2}")
 
     print("\n=== 3. Leitura de ficheiro real — NÃO deve disparar ===")
-    r3 = agent.responder("Lê o ficheiro /mnt/sovereign/superdev/config.py e diz-me quantas linhas tem.")
+    r3 = agent.responder("Lê o ficheiro /mnt/sovereign/superllmlocal/config.py e diz-me quantas linhas tem.")
     disparou_3 = MARCADOR in r3
     print(f"{'OK' if not disparou_3 else 'FALHOU'} — aviso presente: {disparou_3}")
 

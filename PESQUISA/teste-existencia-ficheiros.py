@@ -45,7 +45,7 @@ def _mensagens_com_listagem(listagem: str, pedido: str = "existe algum ficheiro 
         {"role": "system", "content": agent.config.CORE_IDENTITY},
         {"role": "user", "content": pedido},
         {"role": "assistant", "content": "", "tool_calls": [
-            {"function": {"name": "listar_ficheiros", "arguments": {"caminho": "/mnt/sovereign/superdev"}}}
+            {"function": {"name": "listar_ficheiros", "arguments": {"caminho": "/mnt/sovereign/superllmlocal"}}}
         ]},
         {"role": "tool", "content": listagem},
     ]
@@ -83,7 +83,7 @@ def teste_incidente_real() -> bool:
     print("\n=== 2. Retroactivo contra o incidente real (16 Ago) ===")
     # Listagem REAL, ao vivo, com os mesmos argumentos que o modelo
     # usou nesse incidente (confirmado em chamadas.jsonl).
-    listagem_real = tools.listar_ficheiros("/mnt/sovereign/superdev")
+    listagem_real = tools.listar_ficheiros("/mnt/sovereign/superllmlocal")
     print(f"(confirmado ao vivo: 'utils.py' na listagem real = {'utils.py' in listagem_real}, "
           f"'memoria.py' na listagem real = {'memoria.py' in listagem_real})")
 
@@ -103,7 +103,7 @@ def teste_incidente_real() -> bool:
 
 def teste_regressao_confusao_sem_falsidade() -> bool:
     print("\n=== 3. Regressão — troca #6 real (confusão de formatação, sem afirmação falsa) ===")
-    listagem_real = tools.listar_ficheiros("/mnt/sovereign/superdev")
+    listagem_real = tools.listar_ficheiros("/mnt/sovereign/superllmlocal")
     mensagens = _mensagens_com_listagem(listagem_real, "o nome utils.py está onde? não encontro!")
     # Excerto real — organizado de forma confusa (secção "NÃO vejo" com
     # itens que na verdade estão na lista), mas cada afirmação
@@ -143,12 +143,12 @@ def teste_multiplas_listagens_falso_positivo() -> bool:
         {"role": "system", "content": agent.config.CORE_IDENTITY},
         {"role": "user", "content": "quantos ficheiros .py existem nesta pasta?"},
         {"role": "assistant", "content": "", "tool_calls": [
-            {"function": {"name": "listar_ficheiros", "arguments": {"caminho": "/mnt/sovereign/superdev"}}},
+            {"function": {"name": "listar_ficheiros", "arguments": {"caminho": "/mnt/sovereign/superllmlocal"}}},
         ]},
         {"role": "tool", "content": "agent.py\nconfig.py\ntools.py\nverificacoes.py\nPESQUISA/\nlogs/"},
         {"role": "assistant", "content": "", "tool_calls": [
-            {"function": {"name": "listar_ficheiros", "arguments": {"caminho": "/mnt/sovereign/superdev/PESQUISA"}}},
-            {"function": {"name": "listar_ficheiros", "arguments": {"caminho": "/mnt/sovereign/superdev/logs"}}},
+            {"function": {"name": "listar_ficheiros", "arguments": {"caminho": "/mnt/sovereign/superllmlocal/PESQUISA"}}},
+            {"function": {"name": "listar_ficheiros", "arguments": {"caminho": "/mnt/sovereign/superllmlocal/logs"}}},
         ]},
         {"role": "tool", "content": "(pasta vazia)"},
         {"role": "tool", "content": "(pasta vazia)"},

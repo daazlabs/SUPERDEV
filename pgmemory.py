@@ -14,7 +14,7 @@ Reutiliza memory._embed() — o nomic-embed-text continua a ser a régua,
 só o sítio onde os números ficam guardados é que muda.
 
 DSN local de desenvolvimento — credenciais em db/.env, container
-próprio (superdev-postgres), porta 5443 só em 127.0.0.1.
+próprio (superllmlocal-postgres), porta 5443 só em 127.0.0.1.
 
 POOL DE LIGAÇÕES (9 Ago 2026) — medido ao vivo: abrir uma ligação nova
 a cada pesquisa custava ~8ms, a maior parte do que tornava isto mais
