@@ -128,12 +128,45 @@ def teste_regressao_trivial() -> bool:
     return ok1
 
 
+def teste_multiplas_listagens_falso_positivo() -> bool:
+    """BUG REAL corrigido 17 Ago 2026 (achado a testar o SUPERLLMAPI,
+    ver HISTORICO.md desse repo) — quando a troca chama
+    listar_ficheiros mais que uma vez para pastas DIFERENTES, olhar só
+    para a ÚLTIMA listagem é um falso positivo directo se a última
+    chamada calhar ser uma subpasta que não contém os ficheiros
+    citados, mesmo que uma chamada ANTERIOR da mesma troca os tivesse
+    mostrado. Reproduz exactamente o padrão real: pasta principal
+    primeiro, depois 2 subpastas em paralelo (o CORE_IDENTITY incentiva
+    agrupar chamadas independentes na mesma resposta)."""
+    print("\n=== 5. Regressão — múltiplas listagens na mesma troca (bug de 17 Ago) ===")
+    mensagens = [
+        {"role": "system", "content": agent.config.CORE_IDENTITY},
+        {"role": "user", "content": "quantos ficheiros .py existem nesta pasta?"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"function": {"name": "listar_ficheiros", "arguments": {"caminho": "/mnt/sovereign/superdev"}}},
+        ]},
+        {"role": "tool", "content": "agent.py\nconfig.py\ntools.py\nverificacoes.py\nPESQUISA/\nlogs/"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"function": {"name": "listar_ficheiros", "arguments": {"caminho": "/mnt/sovereign/superdev/PESQUISA"}}},
+            {"function": {"name": "listar_ficheiros", "arguments": {"caminho": "/mnt/sovereign/superdev/logs"}}},
+        ]},
+        {"role": "tool", "content": "(pasta vazia)"},
+        {"role": "tool", "content": "(pasta vazia)"},
+    ]
+    resposta = "Existem 4 ficheiros .py: agent.py, config.py, tools.py, verificacoes.py"
+    resultado = verificacoes.verificar_existencia_ficheiros(resposta, mensagens)
+    ok = MARCADOR not in resultado
+    print(f"{'OK' if ok else 'FALHOU'} — ficheiros reais da 1ª listagem, não deve disparar mesmo com listagens seguintes vazias")
+    return ok
+
+
 if __name__ == "__main__":
     ok = (
         teste_deterministico()
         and teste_incidente_real()
         and teste_regressao_confusao_sem_falsidade()
         and teste_regressao_trivial()
+        and teste_multiplas_listagens_falso_positivo()
     )
     print(f"\n{'TUDO OK' if ok else 'HÁ FALHAS'}")
     sys.exit(0 if ok else 1)

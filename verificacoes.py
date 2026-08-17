@@ -537,12 +537,25 @@ def _resultados_por_ferramenta(mensagens: list, nome_ferramenta: str) -> list[st
 def verificar_existencia_ficheiros(resposta: str, mensagens: list) -> str:
     """Se a resposta afirma que um ficheiro existe/está na lista, e
     listar_ficheiros foi mesmo chamado nesta troca, confere se o nome
-    aparece de facto na última listagem real — sem isto, é uma
-    contradição directa do próprio resultado que o modelo leu."""
+    aparece de facto nalguma listagem real desta troca — sem isto, é
+    uma contradição directa do próprio resultado que o modelo leu.
+
+    BUG REAL corrigido 17 Ago 2026 (achado ao testar o SUPERLLMAPI,
+    ver HISTORICO.md desse repo — lógica idêntica aqui, mesmo bug):
+    quando a troca chama listar_ficheiros mais que uma vez para
+    pastas DIFERENTES (ex.: pasta principal, depois 2 subpastas em
+    paralelo — o próprio CORE_IDENTITY incentiva agrupar chamadas
+    independentes na mesma resposta), olhar só para listagens[-1]
+    pega na ÚLTIMA chamada, não necessariamente a relevante — ficheiros
+    reais listados numa chamada ANTERIOR da mesma troca disparavam
+    "existência contraditada" por engano, um falso positivo directo.
+    Corrigido para juntar TODAS as listagens desta troca antes de
+    confirmar — um ficheiro só conta como "não confirmado" se estiver
+    ausente de qualquer uma delas."""
     listagens = _resultados_por_ferramenta(mensagens, "listar_ficheiros")
     if not listagens:
         return resposta
-    ultima_listagem = listagens[-1]
+    todas_listagens = "\n".join(listagens)
 
     # Nomes da última pergunta do utilizador nesta troca — uma
     # afirmação vaga ("Sim, existem!") confirma implicitamente os
@@ -565,7 +578,7 @@ def verificar_existencia_ficheiros(resposta: str, mensagens: list) -> str:
             continue
         nomes_na_frase = set(_PADRAO_NOME_FICHEIRO.findall(frase)) or nomes_do_pedido
         for nome in nomes_na_frase:
-            if nome not in ultima_listagem:
+            if nome not in todas_listagens:
                 afirmados_ausentes.add(nome)
 
     if not afirmados_ausentes:

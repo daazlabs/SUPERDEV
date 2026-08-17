@@ -2332,3 +2332,38 @@ Servidor reiniciado, confirmado ao vivo com um pedido real de leitura
 de ficheiro (sem falso positivo). Commitado (ficheiros desta peça
 só — `memory.py` tinha uma alteração de outra sessão/processo em
 paralelo, não relacionada, deixada de fora deste commit de propósito).
+
+## Corrige falso positivo de existência com múltiplas listagens na troca (17 Ago 2026)
+
+Achado a testar o SUPERLLMAPI a sério (repo irmão, ver
+`/mnt/sovereign/superllmapi/HISTORICO.md`) contra o DeepSeek: um
+pedido trivial ("quantos ficheiros .py existem nesta pasta?") gerou
+uma resposta correcta (5 ficheiros reais, confirmados por
+`listar_ficheiros`) mas mesmo assim disparou "aviso de existência
+contraditada" — um FALSO POSITIVO da própria rede de verificação.
+
+**Causa raiz**: o modelo chamou `listar_ficheiros` 3 vezes na mesma
+troca — pasta principal primeiro, depois 2 subpastas em paralelo (o
+próprio `CORE_IDENTITY` incentiva agrupar chamadas independentes na
+mesma resposta, ver 11 Ago 2026). `verificar_existencia_ficheiros`
+só olhava para `listagens[-1]` (a ÚLTIMA chamada) — que calhou ser
+uma subpasta vazia, não a listagem principal onde os 5 ficheiros
+reais apareciam. O mesmo bug afecta os dois repos por igual (código
+idêntico, cópia).
+
+**Corrigido**: `verificacoes.py` (SUPERDEV e SUPERLLMAPI, os dois)
+— junta TODAS as listagens de `listar_ficheiros` desta troca antes
+de confirmar (`todas_listagens = "\n".join(listagens)`), em vez de só
+a última. Um ficheiro só conta como "não confirmado" se estiver
+ausente de qualquer uma delas.
+
+**Testado**: `PESQUISA/teste-existencia-ficheiros.py` ganhou um 5º
+caso reproduzindo exactamente o padrão real (listagem principal +
+2 subpastas vazias em paralelo) — `TUDO OK`, os 4 casos anteriores
+sem alteração. `ruff` limpo. Servidor reiniciado.
+
+**Nota sobre o processo**: este bug só apareceu porque testámos o
+SUPERLLMAPI a sério contra uma API real, não em teste sintético —
+confirma exactamente a razão de o utilizador ter pedido testes reais
+("dá para testar e perceber como funciona, e ver se erra") em vez de
+só construir por cima sem verificar ao vivo.
