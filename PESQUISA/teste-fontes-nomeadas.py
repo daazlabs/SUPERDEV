@@ -1,6 +1,6 @@
 """
 Teste da verificação de fontes nomeadas sem URL (16 Ago 2026, ver
-HISTORICO.md e o comentário junto a agent._verificar_fontes_nomeadas).
+HISTORICO.md e o comentário junto a verificacoes.verificar_fontes_nomeadas).
 
 Extensão directa de _verificar_urls_citados (13 Ago 2026) para o caso
 adjacente: uma fonte citada por NOME ("segundo a CMVM...", "de acordo
@@ -36,6 +36,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import agent
+import verificacoes
 
 MARCADOR = "aviso de fontes não confirmadas"
 
@@ -48,27 +49,27 @@ def teste_deterministico() -> bool:
         {"role": "tool", "content": "Resultado real do Banco de Portugal sobre inflação."},
     ]
 
-    r1 = agent._verificar_fontes_nomeadas(
+    r1 = verificacoes.verificar_fontes_nomeadas(
         "Segundo o Banco de Portugal, a inflação desceu.", mensagens)
     ok1 = MARCADOR not in r1
     print(f"{'OK' if ok1 else 'FALHOU'} — fonte real citada, não deve disparar")
 
-    r2 = agent._verificar_fontes_nomeadas(
+    r2 = verificacoes.verificar_fontes_nomeadas(
         "Segundo a CMVM, o produto foi suspenso.", mensagens)
     ok2 = MARCADOR in r2
     print(f"{'OK' if ok2 else 'FALHOU'} — sigla inventada (CMVM não apareceu nesta troca), deve disparar")
 
-    r3 = agent._verificar_fontes_nomeadas(
+    r3 = verificacoes.verificar_fontes_nomeadas(
         "De acordo com o Fórum Investidores Unidos, o produto é mau.", mensagens)
     ok3 = MARCADOR in r3
     print(f"{'OK' if ok3 else 'FALHOU'} — nome próprio inventado, deve disparar")
 
-    r4 = agent._verificar_fontes_nomeadas(
+    r4 = verificacoes.verificar_fontes_nomeadas(
         "A CMVM não foi mencionada em lado nenhum desta troca.", mensagens)
     ok4 = MARCADOR not in r4
     print(f"{'OK' if ok4 else 'FALHOU'} — sem pista de citação, não deve disparar mesmo com sigla ausente")
 
-    r5 = agent._verificar_fontes_nomeadas(
+    r5 = verificacoes.verificar_fontes_nomeadas(
         "Segundo Portugal, a inflação desceu.", mensagens)
     ok5 = MARCADOR not in r5
     print(f"{'OK' if ok5 else 'FALHOU'} — nome de 1 palavra só, fora do âmbito deliberado, não deve disparar")
@@ -97,7 +98,7 @@ def teste_padrao_sem_url() -> bool:
         "Segundo a CMVM, há reclamações registadas sobre este PPR em 2026, "
         "e de acordo com o Fórum Investidores Unidos o produto tem mau retorno."
     )
-    resultado = agent._verificar_fontes_nomeadas(resposta_fabricada, mensagens)
+    resultado = verificacoes.verificar_fontes_nomeadas(resposta_fabricada, mensagens)
     ok = MARCADOR in resultado
     print(f"{'OK' if ok else 'FALHOU'} — fontes fabricadas sem URL disparam o aviso")
     return ok
@@ -118,7 +119,7 @@ def teste_regressao_fonte_legitima() -> bool:
         {"role": "user", "content": "o que diz a Comissão Europeia sobre isto?"},
         {"role": "tool", "content": "A Comissão Europeia publicou um relatório em 2026 sobre o tema."},
     ]
-    r1 = agent._verificar_fontes_nomeadas(
+    r1 = verificacoes.verificar_fontes_nomeadas(
         "Segundo a Comissão Europeia, o relatório de 2026 confirma isto.", mensagens)
     ok1 = MARCADOR not in r1
     print(f"{'OK' if ok1 else 'FALHOU'} — fonte legítima (presente no texto lido), não deve disparar")

@@ -2276,3 +2276,59 @@ contra o resultado real, não só "foi chamada/citada") continua por
 tomar — cada uma das 2 peças novas de hoje tropeçou de novo no mesmo
 limite ("mecânico, não julga significado") que motivou a proposta do
 Nível 2 em primeiro lugar.
+
+## Extrai a rede de verificação para verificacoes.py (17 Ago 2026)
+
+Nasce de uma conversa de arquitectura mais larga com o utilizador
+sobre ter agentes dedicados por classe de modelo (local pequeno/
+grande vs. API paga) em vez de um único núcleo a tentar servir todos
+— ver a discussão completa e o novo repo irmão em
+`/mnt/sovereign/superllmapi`. Consequência directa para o SUPERDEV:
+as 6 funções `_verificar_*` (Nível 1 → 1.5 → URLs → fontes nomeadas →
+ficheiros citados → existência contraditada) já eram, por desenho
+desde 10 Ago, completamente independentes do modelo por baixo — só
+faltava estarem num módulo à parte para serem reaproveitáveis por
+cópia noutro agente sem arrastar o resto do `agent.py`.
+
+**Refactor puro, sem mudar comportamento nenhum**: bloco contíguo
+`agent.py:154-698` movido tal e qual para `verificacoes.py` (helpers
+privados e regex incluídos, comentários históricos intactos). As 6
+funções públicas perderam o underscore inicial (`verificar_grounding`,
+etc. — deixou de fazer sentido quando passam a ser a API pública de um
+módulo importado de fora, ao contrário de quando eram detalhe interno
+do `agent.py`). `agent.py` passa a `import verificacoes` e chama
+`verificacoes.verificar_X(...)` nos mesmos 6 pontos de `responder()`.
+Os 5 testes que chamavam `agent._verificar_X` directamente
+(`teste-verificacao-urls.py`, `teste-fontes-nomeadas.py`,
+`teste-ficheiros-citados.py`, `teste-existencia-ficheiros.py`,
+`teste-nivel15-fundamento.py`) foram actualizados para
+`verificacoes.verificar_X`, mantendo `import agent` para o resto
+(`agent.responder`, `agent.config.CORE_IDENTITY`).
+
+**Testado**: os 4 testes rápidos (determinístico + retroactivo contra
+incidente real + regressão) passaram todos sem diferença — `TUDO OK`.
+`teste-orcamento-voltas.py` e `teste-cache-ferramentas.py` (não tocam
+`verificacoes.py`, mas exercitam `responder()` de ponta a ponta) sem
+mudança. `ruff check` limpo (só o BLE001 já tolerado, pré-existente).
+
+**`teste-nivel15-fundamento.py` (o único lento, chama a Ollama a
+sério) "FALHOU" à primeira — investigado a fundo antes de assumir
+regressão**: confirmado por teste sintético isolado que
+`verificacoes.verificar_fundamento_categorias()` continua a disparar
+correctamente num caso controlado — a função está intacta. A causa
+real, confirmada em `logs/chamadas.jsonl` desta troca: desta vez o
+modelo chamou `pesquisar_web` A SÉRIO (várias rondas, 3 pesquisas de
+cada vez) — por isso o Nível 1.5 correctamente NÃO dispara (a
+categoria "web" foi tocada). Os URLs/citações fabricados por cima
+dessa pesquisa real (Reddit, Doutor Finanças, etc., nenhum deles no
+resultado real das pesquisas) foram apanhados de qualquer forma pela
+verificação de fontes nomeadas, que disparou correctamente. É
+exactamente a limitação já documentada do Nível 1.5 desde 13 Ago
+("apanha fingiu que pesquisou, não apanha pesquisou mas distorceu") a
+reaparecer por não-determinismo do modelo entre execuções (variou
+também nas tentativas de 13 Ago) — não uma regressão do refactor.
+
+Servidor reiniciado, confirmado ao vivo com um pedido real de leitura
+de ficheiro (sem falso positivo). Commitado (ficheiros desta peça
+só — `memory.py` tinha uma alteração de outra sessão/processo em
+paralelo, não relacionada, deixada de fora deste commit de propósito).

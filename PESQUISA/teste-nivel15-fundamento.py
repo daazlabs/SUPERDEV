@@ -1,6 +1,6 @@
 """
 Teste ao vivo do Nível "1.5" do anti-confabulação (13 Ago 2026, ver
-HISTORICO.md e o comentário junto a agent._verificar_fundamento_categorias).
+HISTORICO.md e o comentário junto a verificacoes.verificar_fundamento_categorias).
 
 Corre agent.responder() a sério (chama a Ollama de verdade, não é
 unitário) em 3 casos:

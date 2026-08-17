@@ -37,6 +37,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import agent
+import verificacoes
 
 MARCADOR = "aviso de ficheiros não confirmados"
 
@@ -52,17 +53,17 @@ def teste_deterministico() -> bool:
         {"role": "tool", "content": "conteúdo real de agent.py aqui"},
     ]
 
-    r1 = agent._verificar_ficheiros_citados(
+    r1 = verificacoes.verificar_ficheiros_citados(
         "**agent.py** (48.591 caracteres): é o núcleo do agente.", mensagens)
     ok1 = MARCADOR not in r1
     print(f"{'OK' if ok1 else 'FALHOU'} — ficheiro realmente lido (nos argumentos da ferramenta), não deve disparar")
 
-    r2 = agent._verificar_ficheiros_citados(
+    r2 = verificacoes.verificar_ficheiros_citados(
         "**utils.py** (1.234 caracteres): contém funções utilitárias.", mensagens)
     ok2 = MARCADOR in r2
     print(f"{'OK' if ok2 else 'FALHOU'} — ficheiro inventado, nunca tocado nesta troca, deve disparar")
 
-    r3 = agent._verificar_ficheiros_citados(
+    r3 = verificacoes.verificar_ficheiros_citados(
         "Já agora, utils.py também pode ser relevante para isto.", mensagens)
     ok3 = MARCADOR not in r3
     print(f"{'OK' if ok3 else 'FALHOU'} — menção casual (sem bloco descritivo), fora do âmbito deliberado, não deve disparar")
@@ -71,7 +72,7 @@ def teste_deterministico() -> bool:
         {"role": "system", "content": "system prompt"},
         {"role": "user", "content": "o que faz o ficheiro tools.py?"},
     ]
-    r4 = agent._verificar_ficheiros_citados(
+    r4 = verificacoes.verificar_ficheiros_citados(
         "**tools.py** (35.214 caracteres): define as ferramentas do agente.", mensagens_pedido)
     ok4 = MARCADOR not in r4
     print(f"{'OK' if ok4 else 'FALHOU'} — nome citado pelo próprio utilizador no pedido, não deve disparar")
@@ -101,7 +102,7 @@ def teste_incidente_real() -> bool:
         # histórico curto, mas não confirma utils.py/memoria.py.
         {"role": "assistant", "content": "resposta anterior sobre chat.py/server.py"},
     ]
-    resultado = agent._verificar_ficheiros_citados(resposta_real, mensagens_reais)
+    resultado = verificacoes.verificar_ficheiros_citados(resposta_real, mensagens_reais)
     ok = MARCADOR in resultado and "utils.py" in resultado and "memoria.py" in resultado
     print(f"{'OK' if ok else 'FALHOU'} — os 2 ficheiros fabricados do incidente real disparam o aviso: {resultado[-300:]!r}")
     return ok
@@ -122,7 +123,7 @@ def teste_regressao_ficheiro_real_lido() -> bool:
     # parte — esta verificação só confirma que o FICHEIRO foi tocado,
     # não que os números estejam certos.
     resposta = "**chat.py** (3.452 caracteres): terminal de conversa bonito."
-    resultado = agent._verificar_ficheiros_citados(resposta, mensagens)
+    resultado = verificacoes.verificar_ficheiros_citados(resposta, mensagens)
     ok = MARCADOR not in resultado
     print(f"{'OK' if ok else 'FALHOU'} — ficheiro real tocado, não deve disparar mesmo com contagem errada")
     return ok

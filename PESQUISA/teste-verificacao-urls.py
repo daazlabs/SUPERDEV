@@ -1,6 +1,6 @@
 """
 Teste da verificação de URLs citados (13 Ago 2026, ver HISTORICO.md e
-o comentário junto a agent._verificar_urls_citados).
+o comentário junto a verificacoes.verificar_urls_citados).
 
 Incidente real motivador: ao testar a regra preventiva do Nível 0
 (par do Nível 1.5), o modelo chamou pesquisar_web A SÉRIO (3 vezes)
@@ -31,6 +31,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import agent
+import verificacoes
 
 MARCADOR = "aviso de URLs"
 
@@ -43,15 +44,15 @@ def teste_deterministico() -> bool:
         {"role": "tool", "content": "Resultado real: https://exemplo-real.com/pagina-verdadeira encontrado."},
     ]
 
-    r1 = agent._verificar_urls_citados("Encontrei em https://exemplo-real.com/pagina-verdadeira.", mensagens)
+    r1 = verificacoes.verificar_urls_citados("Encontrei em https://exemplo-real.com/pagina-verdadeira.", mensagens)
     ok1 = MARCADOR not in r1
     print(f"{'OK' if ok1 else 'FALHOU'} — URL real citado, não deve disparar")
 
-    r2 = agent._verificar_urls_citados("Encontrei em https://site-totalmente-inventado.pt/falso.", mensagens)
+    r2 = verificacoes.verificar_urls_citados("Encontrei em https://site-totalmente-inventado.pt/falso.", mensagens)
     ok2 = MARCADOR in r2
     print(f"{'OK' if ok2 else 'FALHOU'} — URL inventado, deve disparar")
 
-    r3 = agent._verificar_urls_citados("Não há evidência nenhuma disto.", mensagens)
+    r3 = verificacoes.verificar_urls_citados("Não há evidência nenhuma disto.", mensagens)
     ok3 = MARCADOR not in r3
     print(f"{'OK' if ok3 else 'FALHOU'} — sem URL nenhum, não deve disparar")
 
@@ -88,7 +89,7 @@ def teste_incidente_real() -> bool:
         ]})
         mensagens_reais.append({"role": "tool", "content": "[SEM RESULTADOS] A pesquisa não devolveu nada de útil."})
 
-    resultado = agent._verificar_urls_citados(resposta_real, mensagens_reais)
+    resultado = verificacoes.verificar_urls_citados(resposta_real, mensagens_reais)
     ok = MARCADOR in resultado
     print(f"{'OK' if ok else 'FALHOU'} — os 3 URLs fabricados do incidente real disparam o aviso")
     return ok

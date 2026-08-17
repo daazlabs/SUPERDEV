@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import agent
 import tools
+import verificacoes
 
 MARCADOR = "aviso de existência contraditada"
 
@@ -55,15 +56,15 @@ def teste_deterministico() -> bool:
     listagem = "agent.py\nconfig.py\ntools.py\nmemory.py"
 
     mensagens = _mensagens_com_listagem(listagem, "utils.py existe?")
-    r1 = agent._verificar_existencia_ficheiros("Sim, utils.py existe.", mensagens)
+    r1 = verificacoes.verificar_existencia_ficheiros("Sim, utils.py existe.", mensagens)
     ok1 = MARCADOR in r1
     print(f"{'OK' if ok1 else 'FALHOU'} — nome ausente da listagem, afirmado como existente, deve disparar")
 
-    r2 = agent._verificar_existencia_ficheiros("Sim, agent.py existe.", mensagens)
+    r2 = verificacoes.verificar_existencia_ficheiros("Sim, agent.py existe.", mensagens)
     ok2 = MARCADOR not in r2
     print(f"{'OK' if ok2 else 'FALHOU'} — nome presente na listagem, não deve disparar")
 
-    r3 = agent._verificar_existencia_ficheiros("Não, utils.py não existe nesta pasta.", mensagens)
+    r3 = verificacoes.verificar_existencia_ficheiros("Não, utils.py não existe nesta pasta.", mensagens)
     ok3 = MARCADOR not in r3
     print(f"{'OK' if ok3 else 'FALHOU'} — negação (afirmação correcta de ausência), não deve disparar")
 
@@ -71,7 +72,7 @@ def teste_deterministico() -> bool:
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "utils.py existe?"},
     ]
-    r4 = agent._verificar_existencia_ficheiros("Sim, utils.py existe.", mensagens_sem_listagem)
+    r4 = verificacoes.verificar_existencia_ficheiros("Sim, utils.py existe.", mensagens_sem_listagem)
     ok4 = MARCADOR not in r4
     print(f"{'OK' if ok4 else 'FALHOU'} — sem listar_ficheiros chamado nesta troca, não deve disparar")
 
@@ -94,7 +95,7 @@ def teste_incidente_real() -> bool:
         "**memory.py** (2.891 caracteres): implementa RAG mínimo.\n"
         "**pgmemory.py** (2.345 caracteres): versão \"produto\" com pgvector."
     )
-    resultado = agent._verificar_existencia_ficheiros(resposta_real, mensagens_reais)
+    resultado = verificacoes.verificar_existencia_ficheiros(resposta_real, mensagens_reais)
     ok = MARCADOR in resultado and "utils.py" in resultado and "memoria.py" in resultado
     print(f"{'OK' if ok else 'FALHOU'} — a contradição real dispara para os 2 nomes: {resultado[-250:]!r}")
     return ok
@@ -113,7 +114,7 @@ def teste_regressao_confusao_sem_falsidade() -> bool:
         "- `HISTORICO.md` - está na lista\n"
         "- `PESQUISA/` - está na lista\n"
     )
-    resultado = agent._verificar_existencia_ficheiros(resposta_real, mensagens)
+    resultado = verificacoes.verificar_existencia_ficheiros(resposta_real, mensagens)
     ok = MARCADOR not in resultado
     print(f"{'OK' if ok else 'FALHOU'} — nenhuma afirmação individual é falsa (HISTORICO.md/PESQUISA/ estão mesmo lá), não deve disparar")
     return ok
