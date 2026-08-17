@@ -2046,3 +2046,233 @@ tempos antes de mexer mais — é o único tipo de teste que ainda não
 foi feito a nenhuma destas peças —, ou decidir sobre o Nível 2
 completo (verificação semântica, dobra o custo por resposta) se o
 padrão de "pesquisou mas distorceu" continuar a aparecer.
+
+## Verificação de fontes nomeadas sem URL (16 Ago 2026)
+
+Extensão directa de `_verificar_urls_citados` (commit `bbbb641`, 13
+Ago) para o caso adjacente: uma fonte citada por NOME ("segundo a
+CMVM...", "de acordo com o Fórum X...") sem link nenhum a acompanhar.
+O incidente real de 13 Ago (fórum/banco/CMVM inventados) tinha sempre
+URL, por isso já ficou coberto pela verificação anterior — isto fecha
+a variante sem URL do mesmo padrão, ainda por reproduzir ao vivo
+nesta data.
+
+`agent._verificar_fontes_nomeadas()`: dentro de frases com uma pista
+de citação explícita ("segundo", "de acordo com", + as palavras-chave
+já existentes do Nível 1.5), extrai nomes próprios de 2+ palavras e
+siglas de 2-6 letras, e confirma que cada um aparece, tal e qual, no
+texto das ferramentas/utilizador desta troca — mesmo princípio da
+verificação de URLs, só sem exigir um link. Mecânico e barato (regex
++ comparação de string, sem chamar o modelo).
+
+**Achado ao testar**: "Segundo Portugal, ..." capturava "Segundo
+Portugal" como nome próprio de 2 palavras, só por o conector de
+citação em início de frase vir com maiúscula — corrigido removendo as
+palavras de ligação das próprias pistas
+(`_PALAVRAS_PISTA_CONECTORAS`) das pontas do nome extraído antes de
+decidir se sobra alguma coisa com 2+ palavras.
+
+Deliberadamente estreito, mesma disciplina dos níveis anteriores: só
+apanha invenção ESTRUTURADA (um nome/sigla concreto citado como
+prova), não invenção difusa em prosa livre sem nada concreto agarrado
+— essa fica para uma eventual auditoria por amostragem do Nível 2
+(discutido com o utilizador, não decidido/implementado ainda).
+
+Testado: 4 casos próprios (`PESQUISA/teste-fontes-nomeadas.py`) —
+determinístico (fonte real/sigla inventada/nome inventado/sem pista/
+nome de 1 palavra fora do âmbito), reprodução sintética da variante
+sem URL do incidente real, e 2 regressões ao vivo contra o servidor
+real (trivial + fonte legítima). Regressão dos testes existentes
+(URLs, Nível 1.5) confirmada sem alterações. ruff limpo. Servidor
+reiniciado. Commitado e enviado (`7f2bfca`).
+
+## `ver_diagnostico.py`: avisos de URLs/fontes nomeadas + tokens de saída/tempo (16 Ago 2026)
+
+Ficava cego aos 2 níveis mais recentes (verificação de URLs de 13
+Ago, fontes nomeadas desta sessão) — só contava Nível 1/1.5. Também
+só somava tokens de entrada (`prompt_eval_count`); `chamadas.jsonl`
+já regista `eval_count` (saída) e `tempo_medido_end_to_end_s` por
+chamada, só não apareciam no resumo agregado.
+
+Motivado por pergunta directa do utilizador: "estamos mais rápidos?
+consumimos menos tokens? temos um avaliador disso?" — resposta
+honesta era "parcialmente, e com um gap real". Corrido contra os 116
+pedidos reais do dia, apanhou (ao vivo, não teste sintético) os 2
+casos reais que motivaram a peça de fontes nomeadas desta sessão: o
+pedido do DAAZPRIME (só leu ficheiros locais, citou "Banco de
+Portugal"/"Jornal de Negócios" como fonte) e uma pesquisa sobre Qwen
+3.5 (pesquisou a sério, mas comparou benchmarks com "Claude Opus e
+Gemini 3 Pro", ausentes do resultado real).
+
+**Gap sinalizado ao utilizador, não resolvido aqui**: continua sem
+ground truth (não distingue acerto de falso positivo) e sem marca de
+"antes/depois" por commit — as duas peças seguintes desta mesma
+sessão fecham exactamente este gap. Commitado e enviado (`89fb149`).
+
+## Fecha os 2 gaps do avaliador: commit por troca + veredito humano (16 Ago 2026)
+
+A pedido do utilizador ("implementa os dois"), depois de a peça
+anterior identificar que `ver_diagnostico.py` só media TAXA DE
+DISPARO, não TAXA DE PRECISÃO, e agregava tudo cego a qual commit
+estava em produção em cada troca.
+
+1. `agent.py`: `_COMMIT_ATUAL` calculado uma vez no arranque (`git
+   rev-parse --short HEAD`), gravado em cada linha de log
+   (`chamadas.jsonl` via `ollama_chat`, `conversas.jsonl` via
+   `responder()`). Logs anteriores a este commit não têm o campo —
+   ficam agrupados como "desconhecido" em vez de inventar um valor.
+
+2. `config.REVISOES_LOG_FILE` (novo) + `revisar_avisos.py`: percorre
+   as trocas com algum aviso mecânico ainda sem veredito humano,
+   mostra pedido+resposta completos, pede
+   `[a]certo/[f]also positivo/[s]altar/[q]uit`, grava em
+   `logs/revisoes.jsonl` indexado pelo timestamp da troca — não mexe
+   nos logs originais.
+
+3. `ver_diagnostico.py`: novo `--por-commit` agrega
+   trocas/tokens/tempo/taxa de aviso por commit em produção, ordenado
+   pela 1ª troca vista em cada um. Resumo por omissão passa a mostrar
+   quantas trocas problemáticas já foram revistas manualmente e a
+   taxa de acerto entre as revistas.
+
+Testado ao vivo: `agent._COMMIT_ATUAL` confirmado a apanhar o HEAD
+real; um pedido trivial via `agent.responder()` gravou o commit certo
+em `conversas.jsonl`; `revisar_avisos.py` corrido a sério (pipe a/q)
+gravou 1 veredito real, `ver_diagnostico.py` passou a reportar "1/1
+(100%) acertos" a seguir. ruff limpo (só os 2 avisos já tolerados no
+resto do repo: BLE001 em `except Exception` genérico, DTZ006 em
+datetime local para leitura humana). Servidor reiniciado. Commitado e
+enviado (`a1d58f1`).
+
+Ainda no mesmo dia, a pedido do utilizador ("avança! precisamos de
+testes") — ambas as peças acima só tinham sido validadas por comandos
+avulsos no terminal, não um teste repetível como o resto do projecto:
+`PESQUISA/teste-avaliador-antes-depois.py`, 3 casos (ao vivo contra
+`agent._COMMIT_ATUAL`/`git rev-parse`; determinístico com
+`config.LOG_FILE`/`CONVERSATION_LOG_FILE` trocados para ficheiros
+temporários, 3 trocas sintéticas em 2 commits diferentes, confirma
+agrupamento certo por commit; determinístico de ida-e-volta em
+`revisar_avisos._gravar_revisao()`/`ver_diagnostico._carregar_revisoes()`).
+Bloco `finally` confirmado a repor os caminhos reais — nenhum dado
+real contaminado. ruff limpo. Commitado e enviado (`c952974`).
+
+## Verificação de ficheiros citados sem terem sido lidos (16 Ago 2026)
+
+Incidente real ao vivo, apanhado pelo próprio utilizador na sua
+conversa com o SUPERDEV (não em teste): um pedido trivial de
+continuação ("sim") gerou uma resposta a descrever "utils.py" e
+"memoria.py" — nome de função a função, contagem de caracteres
+incluída, tom totalmente confiante ("Aqui está o que cada ficheiro
+faz") — quando NENHUM dos dois ficheiros existe no projecto (é
+"memory.py", nem o nome bateu certo) e SEM CHAMAR NENHUMA FERRAMENTA
+nesta troca (confirmado: as 2 chamadas internas desta troca em
+`chamadas.jsonl` têm `"tools": []` em ambas).
+
+Nenhum nível anterior apanhava isto — sem URL, sem fonte nomeada
+("segundo..."), sem a linguagem estreita de `_CATEGORIAS_FUNDAMENTO`
+("li o ficheiro"/"o ficheiro contém" — a resposta real dizia só
+"Contém funções utilitárias gerais"). É exactamente a "invenção
+difusa em prosa livre" que o Nível 1 já assumia, desde 10 Ago, estar
+fora do alcance de qualquer verificação mecânica — confirmado ao vivo
+nesta troca real, não hipotético.
+
+`agent._verificar_ficheiros_citados()`: extrai nomes de ficheiro
+citados como bloco descritivo ("**nome.ext** (N caracteres):" ou
+"**nome.ext**:") e confirma que cada um foi realmente tocado nesta
+troca — presente nalgum resultado de ferramenta, no que o utilizador
+escreveu, ou nos argumentos de uma chamada de ferramenta feita pelo
+modelo (uma tentativa real, mesmo sem resultado ainda, não é
+invenção). Mecânico e barato, mesmo padrão dos níveis anteriores.
+
+Testado: 8 casos (`PESQUISA/teste-ficheiros-citados.py`) —
+determinístico (ficheiro real tocado/inventado/menção casual fora do
+âmbito/nome só no pedido do utilizador), RETROACTIVO contra o texto
+verbatim do incidente real (dispara para os 2 ficheiros fabricados),
+regressão com o caso legítimo da mesma sessão (chat.py/server.py,
+contagem de caracteres errada mas ficheiro realmente lido — não deve
+disparar, esse é um problema à parte), e regressão trivial ao vivo.
+Regressão da verificação de fontes nomeadas (commit anterior)
+confirmada sem alterações. ruff limpo (só o BLE001 já tolerado).
+Servidor reiniciado — já activo na conversa em curso do utilizador.
+Commitado e enviado (`2c72560`).
+
+## Verificação de existência contraditada pelo próprio `listar_ficheiros` (16 Ago 2026)
+
+2º incidente real da mesma sessão do utilizador, diferente do
+anterior: desta vez o modelo CHAMOU mesmo `listar_ficheiros` —
+confirmado directamente contra a ferramenta (`tools.listar_ficheiros`,
+mesmos argumentos exactos do incidente), resultado real sem
+"utils.py" nem "memoria.py" — e MESMO ASSIM respondeu "Sim,
+existem!" a "utils.py e memoria.py existem mesmo?". Antes de
+construir isto, confirmado ao vivo que `listar_ficheiros`/
+`ler_ficheiro` não têm bug nenhum (a pedido explícito do utilizador)
+— devolvem a listagem certa; o erro é só do modelo a contradizer o
+que leu.
+
+A verificação anterior (`_verificar_ficheiros_citados`) não apanha
+isto: a resposta nunca repete "utils.py"/"memoria.py" num bloco
+descritivo, só confirma em prosa vaga ("Sim, existem!") o que o
+utilizador tinha perguntado — mais próximo do "Nível 2" discutido
+(conteúdo de uma afirmação contra o resultado REAL de uma ferramenta,
+não só se foi chamada), mas continua mecânico: `listar_ficheiros`
+devolve nomes em texto simples, por isso "está literalmente na última
+listagem desta troca?" é substring, não julgamento semântico.
+
+`agent._verificar_existencia_ficheiros()`: casa cada tool_call com a
+respectiva resposta tool (protocolo N chamadas → N respostas, mesma
+ordem — mensagens tool não têm campo "name"), pega na última resposta
+de `listar_ficheiros` desta troca, e confere se cada ficheiro afirmado
+como existente ("existe"/"está na lista", sem negação "não" a
+preceder) aparece mesmo lá. Nomes tirados da própria frase ou, se a
+frase não os repetir, da última pergunta do utilizador nesta troca (o
+caso real: "Sim, existem!" nunca reafirma os nomes).
+
+Testado: 8 casos (`PESQUISA/teste-existencia-ficheiros.py`) —
+determinístico (ausente/presente/negação/sem listar_ficheiros
+chamado), RETROACTIVO com a listagem REAL da pasta
+(`tools.listar_ficheiros` ao vivo) + texto verbatim da resposta real
+(dispara para os 2 nomes), regressão contra a troca #6 da mesma
+sessão (formatação confusa mas nenhuma afirmação individual falsa —
+não dispara, correcto), regressão trivial ao vivo. Regressão da
+verificação de ficheiros citados (commit anterior) confirmada sem
+alterações. ruff limpo. Servidor reiniciado — já activo na conversa
+em curso do utilizador. Commitado e enviado (`ca61fa0`).
+
+## Fecho da sessão de 16 Ago 2026
+
+6 peças construídas e testadas ao vivo no mesmo dia, todas commitadas
+e enviadas para `origin/main` (`7f2bfca` → `89fb149` → `a1d58f1` →
+`c952974` → `2c72560` → `ca61fa0`), servidor reiniciado depois de
+cada uma: verificação de fontes nomeadas sem URL, `ver_diagnostico.py`
+a contar avisos de URLs/fontes + tokens de saída/tempo, os "2 gaps do
+avaliador" (commit em produção gravado por troca + fluxo de veredito
+humano) com teste próprio dedicado, verificação de ficheiros citados
+sem terem sido lidos, verificação de existência contraditada pelo
+próprio `listar_ficheiros`.
+
+**Padrão do dia**: as duas últimas peças nasceram de incidentes REAIS
+apanhados pelo próprio utilizador na sua conversa normal com o
+SUPERDEV (não em teste sintético) — a mesma troca ("utils.py e
+memoria.py existem mesmo?") expôs dois gaps distintos e sucessivos:
+primeiro a resposta descritiva completa sem ficheiro nenhum lido,
+depois — já com essa verificação corrigida — uma contradição directa
+do resultado real de `listar_ficheiros` que a ferramenta chamou. Isto
+reforça o balanço honesto de 13 Ago: mecanismos estreitos e baratos
+continuam a fechar gaps um de cada vez, mas cada fecho revela o
+próximo, nunca "resolve" a fiabilidade de uma vez.
+
+**Estado do avaliador ao fechar o dia** (`ver_diagnostico.py`, 137
+trocas): 15% bateram no limite de voltas, Nível 1.5 disparou em 5%,
+fontes nomeadas em 1%, URLs em 0%. Das trocas com aviso, 18/19 (95%)
+já têm veredito humano registado — todos "acerto", 0 falsos
+positivos até agora. Falta rever 1 troca (`python3
+revisar_avisos.py`).
+
+Por fazer/decidir, transportado de 13 Ago e ainda em aberto: o
+`HISTORICO.md` não foi actualizado durante o dia (esta secção fecha
+esse gap, retroactivamente, na sessão seguinte); a decisão sobre o
+Nível 2 completo (verificação semântica do CONTEÚDO de cada afirmação
+contra o resultado real, não só "foi chamada/citada") continua por
+tomar — cada uma das 2 peças novas de hoje tropeçou de novo no mesmo
+limite ("mecânico, não julga significado") que motivou a proposta do
+Nível 2 em primeiro lugar.
