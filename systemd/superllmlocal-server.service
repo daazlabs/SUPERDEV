@@ -1,12 +1,12 @@
 [Unit]
-Description=SUPERDEV — servidor compatível OpenAI (adaptador para Open WebUI)
+Description=SUPERLLMLOCAL — servidor compatível OpenAI (adaptador para Open WebUI)
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/mnt/sovereign/superdev
+WorkingDirectory=/mnt/sovereign/superllmlocal
 ExecStartPre=/bin/bash -c "fuser -k 8850/tcp 2>/dev/null || true"
-ExecStart=/usr/bin/python3 /mnt/sovereign/superdev/server.py
+ExecStart=/usr/bin/python3 /mnt/sovereign/superllmlocal/server.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
