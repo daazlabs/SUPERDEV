@@ -421,3 +421,14 @@ PG_MEMORY_MIN_SCORE = 0.50
 # palavras-chave reordenar dentro do conjunto, sem perder candidatos
 # que a pontuação puramente semântica pusesse um pouco mais abaixo.
 POOL_CANDIDATOS_SEMANTICOS = 50
+
+# --- Nível 2: verificação semântica (17 Ago 2026) -------------------------
+# Verifica se o CONTEÚDO em prosa livre da resposta (percentagens,
+# afirmações de comportamento, resumos) bate com o que a ferramenta
+# devolveu — não só "foi citada/chamada" (isso já é o Nível 1/1.5).
+# Dobra o custo por resposta (2ª chamada ao modelo), por isso fica
+# desligado por omissão — liga-se para testar.
+NIVEL2_ATIVO = False
+# Respostas curtas/triviais não valem a pena o custo — só corre em
+# respostas com texto suficiente para conter afirmações factuais reais.
+NIVEL2_MIN_CHARS = 400

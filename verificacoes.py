@@ -32,6 +32,9 @@ extra ao modelo) — só correm depois de já termos a resposta final.
 """
 import json
 import re
+import urllib.request
+
+import config
 
 # Nível 1 do plano anti-confabulação (10 Ago 2026, ver HISTORICO.md) —
 # verificação MECÂNICA (regex + comparação de texto), não outro pedido
@@ -589,5 +592,119 @@ def verificar_existencia_ficheiros(resposta: str, mensagens: list) -> str:
         "⚠️ Estes ficheiros são afirmados como existentes, mas NÃO "
         "aparecem no resultado real do último listar_ficheiros desta "
         "troca — contradição directa: " + "; ".join(sorted(afirmados_ausentes))
+    )
+    return resposta + aviso
+
+
+# Verificação semântica de conteúdo (17 Ago 2026) — Nível 2 do plano
+# anti-confabulação. Diferente de todos os anteriores: NÍVEL 1/1.5 são
+# mecânicos (regex + comparação de string, custo ~0), esta é a primeira
+# que pede uma 2ª chamada ao modelo — por isso desligada por omissão
+# (config.NIVEL2_ATIVO = False) e só corre em respostas com texto
+# suficiente para conter afirmações factuais reais (config.NIVEL2_MIN_CHARS).
+#
+# Incidente real motivador: um pedido de pesquisa (DAAZPRIME, 13 Ago
+# 2026) recebeu uma resposta a citar "Google AI Overview"/"ChatGPT" com
+# URLs inventados — o Nível 1.5 confirmou que pesquisar_web NÃO foi
+# chamado (apanhou o "fingiu que pesquisou"), e os URLs foram apanhados
+# pelo verificar_urls_citados. Mas o caso mais subtil ficou por apanhar:
+# "pesquisou mas exagerou por cima" — a ferramenta foi chamada a sério,
+# o URL até pode estar correcto, mas o conteúdo em prosa livre
+# (percentagens, resumos, afirmações de comportamento) não bate com o
+# que a ferramenta realmente devolveu. Nenhuma verificação mecânica
+# alcança isto — é preciso perceber se o SENTIDO de uma frase é
+# suportado pelo texto da fonte, não só se uma string aparece.
+#
+# Gatilho deliberadamente estreito (mesma disciplina de sempre): só
+# corre quando (1) NIVEL2_ATIVO está ligado, (2) a resposta tem texto
+# suficiente (NIVEL2_MIN_CHARS), (3) houve ferramentas nesta troca, E
+# (4) as verificações anteriores não encontraram nada — se o Nível 1/1.5
+# já assinalou um problema concreto, não gastamos uma 2ª chamada ao
+# modelo para ver se há mais; a resposta já está marcada.
+#
+# Custo: 1 chamada ao modelo por resposta que chegue até aqui. O prompt
+# é curto (fontes + resposta), sem tools/histórico — o suficiente para
+# o modelo decidir se as afirmações são suportadas, sem carregar com o
+# contexto pesado do pedido original.
+
+
+def verificar_semantica(resposta: str, mensagens: list) -> str:
+    """Verifica se o conteúdo em prosa livre da resposta (afirmações
+    factuais concretas) é suportado pelo que as ferramentas desta troca
+    realmente devolveram. Não corrige — mesmo princípio do Nível 1:
+    torna a suspeita visível, utilizador decide.
+
+    Só corre quando NIVEL2_ATIVO está ligado. Em caso de dúvida (JSON
+    do modelo inválido, erro de rede, timeout) devolve a resposta
+    original sem aviso — nunca deixa a troca rebentar."""
+    if not config.NIVEL2_ATIVO:
+        return resposta
+    if len(resposta) < config.NIVEL2_MIN_CHARS:
+        return resposta
+    if not any(m.get("role") == "tool" for m in mensagens):
+        return resposta
+
+    # Se as verificações anteriores já assinalaram algo, não gastamos
+    # uma 2ª chamada ao modelo — a resposta já tem aviso(s).
+    if "\n[SUPERLLMLOCAL —" in resposta:
+        return resposta
+
+    fontes = "\n".join(
+        m["content"] for m in mensagens if m.get("role") == "tool" and m.get("content")
+    )
+    if not fontes.strip():
+        return resposta
+
+    prompt = (
+        "Tarefa: verificação factual. FONTE é o resultado real de "
+        "ferramentas. AFIRMAÇÃO é uma resposta que deve basear-se só na "
+        "FONTE. Lista, em JSON (array de strings, [] se nenhuma), as "
+        "frases da AFIRMAÇÃO que fazem uma alegação factual concreta "
+        "(número, comportamento, facto) NÃO suportada pela FONTE. Não "
+        "assinales opiniões, sugestões ou o que já está correcto.\n\n"
+        f"FONTE:\n{fontes}\n\nAFIRMAÇÃO:\n{resposta}"
+    )
+
+    try:
+        body = json.dumps({
+            "model": config.MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "options": config.OPTIONS,
+            "stream": False,
+        }).encode()
+        req = urllib.request.Request(
+            f"{config.OLLAMA_HOST}/api/chat",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = json.loads(r.read())
+        texto_modelo = (data.get("message", {}).get("content") or "").strip()
+        # O modelo nem sempre devolve JSON puro apesar de pedido no
+        # prompt — HISTORICO.md já documentou (10 Ago 2026, tool-calling)
+        # que este modelo pode ignorar instruções de formato e escrever
+        # texto/markdown à volta. Extrai o array JSON de dentro do texto
+        # (ex.: ```json [...] ``` ou "Aqui está: [...]") em vez de exigir
+        # que a resposta inteira seja só o array.
+        match = re.search(r"\[.*\]", texto_modelo, re.DOTALL)
+        if not match:
+            return resposta
+        nao_suportadas = json.loads(match.group(0))
+        if not isinstance(nao_suportadas, list):
+            return resposta
+        nao_suportadas = [s for s in nao_suportadas if isinstance(s, str) and s.strip()]
+    except Exception:  # noqa: BLE001 — catch-all intencional, ver comentário acima
+        # Erro de rede, timeout, JSON inválido do modelo, ou qualquer
+        # outro problema — devolve resposta original sem aviso. Mesmo
+        # princípio das outras verificar_*: em caso de dúvida, não
+        # bloqueia nem assinala, só deixa passar.
+        return resposta
+
+    if not nao_suportadas:
+        return resposta
+
+    aviso = (
+        "\n\n---\n[SUPERLLMLOCAL — verificação semântica Nível 2]\n"
+        "⚠️ Não confirmado na fonte: " + "; ".join(nao_suportadas)
     )
     return resposta + aviso

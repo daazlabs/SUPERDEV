@@ -152,8 +152,8 @@ def ollama_chat(
 
 
 # Rede de verificação mecânica anti-confabulação (Nível 1 → 1.5 → URLs
-# → fontes nomeadas → ficheiros citados → existência contraditada,
-# 10-16 Ago 2026) — extraída para verificacoes.py (17 Ago 2026, refactor
+# → fontes nomeadas → ficheiros citados → existência contraditada →
+# semântica Nível 2, 10-17 Ago 2026) — extraída para verificacoes.py (17 Ago 2026, refactor
 # puro, sem mudar comportamento). Ver esse ficheiro para o raciocínio
 # completo de cada peça (foi movido tal e qual, incidentes e datas
 # incluídos) — extraído precisamente por serem funções puras,
@@ -525,13 +525,14 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
         # Rede de verificação mecânica anti-confabulação — ver
         # verificacoes.py para o raciocínio completo de cada peça
         # (Nível 1 → 1.5 → URLs → fontes nomeadas → ficheiros citados
-        # → existência contraditada, 10-16 Ago 2026).
+        # → existência contraditada → semântica Nível 2, 10-17 Ago 2026).
         resposta = verificacoes.verificar_grounding(resposta, mensagens)
         resposta = verificacoes.verificar_fundamento_categorias(resposta, mensagens)
         resposta = verificacoes.verificar_urls_citados(resposta, mensagens)
         resposta = verificacoes.verificar_fontes_nomeadas(resposta, mensagens)
         resposta = verificacoes.verificar_ficheiros_citados(resposta, mensagens)
         resposta = verificacoes.verificar_existencia_ficheiros(resposta, mensagens)
+        resposta = verificacoes.verificar_semantica(resposta, mensagens)
 
     # Fase de testes (9 Ago 2026, a pedido do utilizador): grava a
     # conversa real (pergunta+resposta), não só métricas — para o
