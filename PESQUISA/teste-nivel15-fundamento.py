@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import agent
 
-MARCADOR = "Nível 1.5"
+MARCADOR = "SUPERLLMLOCAL N1.5"
 
 PEDIDO_DAAZPRIME_REAL = (
     "You are starting a new research round for the DAAZPRIME project. You have NO prior\n"

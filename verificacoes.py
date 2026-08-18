@@ -137,6 +137,21 @@ def _alegacoes_falsas_de_incerteza(resposta: str, reais: dict) -> list[str]:
     return encontradas
 
 
+def _aviso_curto(tag: str, detalhe: str) -> str:
+    """Formato uniforme e curto para os avisos que só assinalam, sem
+    cortar (Nível 1/1.5, URLs, fontes, ficheiros, existência) — usado
+    por todas as verificar_* excepto verificar_numeros_percentagens/
+    verificar_semantica (essas cortam, ver _redigir). Reescrito mais
+    curto a pedido do utilizador (18 Ago 2026): o formato anterior
+    (bloco de várias linhas, "[SUPERLLMLOCAL — aviso de X]" seguido de
+    uma frase inteira a explicar o óbvio) ficava grande e confuso no
+    rodapé de uma resposta normal. `tag` é o mesmo código curto que o
+    dashboard já mostra (`dashboard._detectar_avisos`) — não são dois
+    vocabulários por acaso, escrever a mesma tag nos dois sítios é o
+    que os liga."""
+    return f"\n\n⚠️ [SUPERLLMLOCAL {tag}] {detalhe}"
+
+
 def verificar_grounding(resposta: str, mensagens: list) -> str:
     """Confere se as constantes que a resposta final cita — ou diz não
     saber — batem certo com o que as ferramentas desta troca realmente
@@ -176,18 +191,14 @@ def verificar_grounding(resposta: str, mensagens: list) -> str:
     if not contradicoes and not nao_confirmadas and not falsas_duvidas:
         return resposta
 
-    aviso = "\n\n---\n[SUPERLLMLOCAL — verificação automática de constantes citadas]"
+    partes = []
     if contradicoes:
-        aviso += "\n⚠️ Contradiz o que li nesta troca: " + "; ".join(contradicoes)
+        partes.append("contradiz o lido: " + "; ".join(contradicoes))
     if falsas_duvidas:
-        aviso += "\n⚠️ Disseste \"não sei\" sobre algo que li nesta troca: " + "; ".join(falsas_duvidas)
+        partes.append("disse \"não sei\" sobre algo já lido: " + "; ".join(falsas_duvidas))
     if nao_confirmadas:
-        aviso += (
-            "\n(Não confirmados nos ficheiros lidos nesta troca — podem "
-            "estar certos noutro ficheiro não lido agora, ou inventados: "
-            + "; ".join(nao_confirmadas) + ")"
-        )
-    return resposta + aviso
+        partes.append("não confirmados nos ficheiros lidos: " + "; ".join(nao_confirmadas))
+    return resposta + _aviso_curto("N1", " | ".join(partes))
 
 
 # Nível "1.5" do anti-confabulação (13 Ago 2026, ver HISTORICO.md) —
@@ -263,19 +274,12 @@ def verificar_fundamento_categorias(resposta: str, mensagens: list) -> str:
         tem_linguagem_da_categoria = any(p in resposta_min for p in regras["palavras_chave"])
         tem_ferramenta_correspondente = any(f in ferramentas_chamadas for f in regras["ferramentas"])
         if tem_linguagem_da_categoria and not tem_ferramenta_correspondente:
-            suspeitas.append(f"{categoria} (esperava-se uma de: {', '.join(regras['ferramentas'])})")
+            suspeitas.append(categoria)
 
     if not suspeitas:
         return resposta
 
-    aviso = (
-        "\n\n---\n[SUPERLLMLOCAL — aviso de fundamento (Nível 1.5)]\n"
-        "⚠️ Esta resposta usa linguagem típica de: " + "; ".join(suspeitas) +
-        " — mas a ferramenta correspondente nunca foi chamada nesta "
-        "troca. Pode estar inventado, não confirmado por nenhuma "
-        "pesquisa/leitura real."
-    )
-    return resposta + aviso
+    return resposta + _aviso_curto("N1.5", "fala de " + "; ".join(suspeitas) + " sem confirmar com ferramenta nesta troca")
 
 
 # Verificação de URLs citados (13 Ago 2026, ver HISTORICO.md) —
@@ -327,13 +331,7 @@ def verificar_urls_citados(resposta: str, mensagens: list) -> str:
     if not nao_confirmados:
         return resposta
 
-    aviso = (
-        "\n\n---\n[SUPERLLMLOCAL — aviso de URLs não confirmados]\n"
-        "⚠️ Estes links não aparecem em nenhum resultado de ferramenta "
-        "nem em nada que escreveste nesta troca — podem estar "
-        "inventados: " + "; ".join(nao_confirmados)
-    )
-    return resposta + aviso
+    return resposta + _aviso_curto("URLS", "não confirmados: " + "; ".join(nao_confirmados))
 
 
 # Verificação de fontes nomeadas citadas em prosa, sem URL (16 Ago
@@ -421,13 +419,7 @@ def verificar_fontes_nomeadas(resposta: str, mensagens: list) -> str:
     if not nao_confirmadas:
         return resposta
 
-    aviso = (
-        "\n\n---\n[SUPERLLMLOCAL — aviso de fontes não confirmadas]\n"
-        "⚠️ Estes nomes são citados como fonte, mas não aparecem em "
-        "nenhum resultado de ferramenta nem em nada que escreveste "
-        "nesta troca — podem estar inventados: " + "; ".join(sorted(nao_confirmadas))
-    )
-    return resposta + aviso
+    return resposta + _aviso_curto("FONTES", "não confirmadas: " + "; ".join(sorted(nao_confirmadas)))
 
 
 # Verificação de ficheiros citados sem terem sido lidos/listados (16
@@ -484,13 +476,7 @@ def verificar_ficheiros_citados(resposta: str, mensagens: list) -> str:
     if not nao_confirmados:
         return resposta
 
-    aviso = (
-        "\n\n---\n[SUPERLLMLOCAL — aviso de ficheiros não confirmados]\n"
-        "⚠️ Estes ficheiros são descritos como se tivessem sido lidos, "
-        "mas nunca foram tocados por nenhuma ferramenta nesta troca — "
-        "podem estar inventados: " + "; ".join(nao_confirmados)
-    )
-    return resposta + aviso
+    return resposta + _aviso_curto("FICHEIROS", "não confirmados: " + "; ".join(nao_confirmados))
 
 
 # Verificação de existência contraditada por listar_ficheiros (16 Ago
@@ -597,13 +583,7 @@ def verificar_existencia_ficheiros(resposta: str, mensagens: list) -> str:
     if not afirmados_ausentes:
         return resposta
 
-    aviso = (
-        "\n\n---\n[SUPERLLMLOCAL — aviso de existência contraditada]\n"
-        "⚠️ Estes ficheiros são afirmados como existentes, mas NÃO "
-        "aparecem no resultado real do último listar_ficheiros desta "
-        "troca — contradição directa: " + "; ".join(sorted(afirmados_ausentes))
-    )
-    return resposta + aviso
+    return resposta + _aviso_curto("EXISTÊNCIA", "contradiz listagem: " + "; ".join(sorted(afirmados_ausentes)))
 
 
 # Verificação mecânica de percentagens (18 Ago 2026) — separada do

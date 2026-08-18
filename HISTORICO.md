@@ -2652,3 +2652,43 @@ tooldefs.py` sem regressão (15/15). Testado ao vivo com
 disponível: chamou a ferramenta correctamente, resposta honesta
 (pesquisa sem resultados) — igual ao comportamento antes do filtro,
 mais barato.
+
+## Avisos das 6 verificações mais antigas encurtados (18 Ago 2026)
+
+Utilizador recebeu um aviso real do Nível 1.5 numa conversa — bloco
+de 4 linhas, com a lista de ferramentas esperadas incluída, "grande e
+confuso" no rodapé de uma resposta normal. As outras 5 verificações
+mais antigas (Nível 1, URLs, fontes, ficheiros, existência) tinham o
+mesmo estilo verboso — corrigidas todas de uma vez, não só a que foi
+apontada.
+
+`verificacoes.py`: novo `_aviso_curto(tag, detalhe)` — formato
+uniforme de 1 linha, `⚠️ [SUPERLLMLOCAL {tag}] {detalhe}`, `tag` é o
+mesmo código curto que o dashboard já usa (N1, N1.5, URLS, FONTES,
+FICHEIROS, EXISTÊNCIA) — os dois vocabulários deixam de estar
+separados por acaso. Exemplo real (o mesmo caso que motivou isto):
+antes "[SUPERLLMLOCAL — aviso de fundamento (Nível 1.5)]\n⚠️ Esta
+resposta usa linguagem típica de: web (esperava-se uma de:
+pesquisar_web, ler_pagina_web) — mas a ferramenta correspondente
+nunca foi chamada nesta troca. Pode estar inventado, não confirmado
+por nenhuma pesquisa/leitura real." (~350 caracteres); depois "⚠️
+[SUPERLLMLOCAL N1.5] fala de web sem confirmar com ferramenta nesta
+troca" (~75 caracteres). `verificar_numeros_percentagens`/
+`verificar_semantica` (Nível 2, redesenhadas ontem/hoje com
+redacção) ficaram como estavam — já eram mais compactas.
+
+`dashboard.py`: `_detectar_avisos()` passou a reconhecer a tag curta
+nova OU a frase antiga, para conversas já gravadas antes desta
+mudança não ficarem invisíveis no painel.
+
+5 ficheiros de teste (`teste-verificacao-urls.py`, `teste-fontes-
+nomeadas.py`, `teste-ficheiros-citados.py`, `teste-existencia-
+ficheiros.py`, `teste-nivel15-fundamento.py`) tinham `MARCADOR` a
+verificar o texto antigo literal — actualizados para a tag nova.
+4 dos 5 (determinísticos) voltaram a `TUDO OK`. O 5º
+(`teste-nivel15-fundamento.py`, chama a Ollama a sério, sem mock)
+"falhou" numa corrida do script mas confirmado à parte, manualmente,
+que a tag nova dispara correctamente quando o modelo fabrica —
+instabilidade já documentada desde 13 Ago (o modelo varia entre
+execuções neste caso específico), não regressão desta mudança.
+Servidor e dashboard reiniciados.

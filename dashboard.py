@@ -123,21 +123,27 @@ def _agrupar_por_troca(chamadas: list[dict], conversas: list[dict]) -> list[dict
 
 
 def _detectar_avisos(resposta: str) -> list[str]:
-    """Lista os tipos de aviso presentes numa resposta."""
+    """Lista os tipos de aviso presentes numa resposta.
+
+    Cada categoria confere a tag curta nova (18 Ago 2026, ver
+    verificacoes._aviso_curto — "[SUPERLLMLOCAL N1]" etc.) OU a frase
+    verbosa antiga, para conversas já gravadas antes desta mudança
+    continuarem a ser reconhecidas — sem isso, o histórico já em
+    conversas.jsonl ficava com os avisos invisíveis no painel."""
     avisos = []
     if "atingi o limite de voltas" in resposta:
         avisos.append("LIMITE")
-    if "verificação automática de constantes citadas" in resposta:
+    if "[SUPERLLMLOCAL N1]" in resposta or "verificação automática de constantes citadas" in resposta:
         avisos.append("N1")
-    if "Nível 1.5" in resposta:
+    if "[SUPERLLMLOCAL N1.5]" in resposta or "Nível 1.5" in resposta:
         avisos.append("N1.5")
-    if "aviso de URLs não confirmados" in resposta:
+    if "[SUPERLLMLOCAL URLS]" in resposta or "aviso de URLs não confirmados" in resposta:
         avisos.append("URLS")
-    if "aviso de fontes não confirmadas" in resposta:
+    if "[SUPERLLMLOCAL FONTES]" in resposta or "aviso de fontes não confirmadas" in resposta:
         avisos.append("FONTES")
-    if "aviso de ficheiros não confirmados" in resposta:
+    if "[SUPERLLMLOCAL FICHEIROS]" in resposta or "aviso de ficheiros não confirmados" in resposta:
         avisos.append("FICHEIROS")
-    if "aviso de existência contraditada" in resposta:
+    if "[SUPERLLMLOCAL EXISTÊNCIA]" in resposta or "aviso de existência contraditada" in resposta:
         avisos.append("EXISTÊNCIA")
     if "verificação semântica Nível 2" in resposta:
         avisos.append("N2")

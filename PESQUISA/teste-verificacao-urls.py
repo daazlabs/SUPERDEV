@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import agent
 import verificacoes
 
-MARCADOR = "aviso de URLs"
+MARCADOR = "SUPERLLMLOCAL URLS"
 
 
 def teste_deterministico() -> bool:

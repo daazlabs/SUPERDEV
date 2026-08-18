@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import agent
 import verificacoes
 
-MARCADOR = "aviso de ficheiros não confirmados"
+MARCADOR = "SUPERLLMLOCAL FICHEIROS"
 
 
 def teste_deterministico() -> bool:

@@ -37,7 +37,7 @@ import agent
 import tools
 import verificacoes
 
-MARCADOR = "aviso de existência contraditada"
+MARCADOR = "SUPERLLMLOCAL EXISTÊNCIA"
 
 
 def _mensagens_com_listagem(listagem: str, pedido: str = "existe algum ficheiro X?") -> list:

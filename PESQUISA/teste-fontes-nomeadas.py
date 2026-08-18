@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import agent
 import verificacoes
 
-MARCADOR = "aviso de fontes não confirmadas"
+MARCADOR = "SUPERLLMLOCAL FONTES"
 
 
 def teste_deterministico() -> bool:
