@@ -122,6 +122,7 @@ tr.expandido { background: var(--bg3); }
 .tag-ficheiros { background: #3b0764; color: #e879f9; }
 .tag-existencia { background: #7f1d1d; color: #fca5a5; }
 .tag-n2 { background: #064e3b; color: #6ee7b7; }
+.tag-pct { background: #164e63; color: #67e8f9; }
 .tag-rev { background: #14532d; color: #86efac; }
 .tag-fp { background: #450a0a; color: #fca5a5; }
 
@@ -358,7 +359,7 @@ function tagAviso(tipo) {
   const mapa = {
     'LIMITE': 'tag-limite', 'N1': 'tag-n1', 'N1.5': 'tag-n15',
     'URLS': 'tag-urls', 'FONTES': 'tag-fontes', 'FICHEIROS': 'tag-ficheiros',
-    'EXISTÊNCIA': 'tag-existencia', 'N2': 'tag-n2',
+    'EXISTÊNCIA': 'tag-existencia', 'N2': 'tag-n2', 'PCT': 'tag-pct',
   };
   return `<span class="tag ${mapa[tipo] || ''}">${tipo}</span>`;
 }

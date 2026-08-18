@@ -141,6 +141,8 @@ def _detectar_avisos(resposta: str) -> list[str]:
         avisos.append("EXISTÊNCIA")
     if "verificação semântica Nível 2" in resposta:
         avisos.append("N2")
+    if "percentagem não confirmada" in resposta:
+        avisos.append("PCT")
     return avisos
 
 

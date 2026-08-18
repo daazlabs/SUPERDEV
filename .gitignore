@@ -15,3 +15,4 @@ memory/_index.json
 # Logs de execução — só métricas (nunca o texto real das conversas,
 # confirmado), mas mesmo assim não é código-fonte, não pertence ao git
 logs/*.jsonl
+logs/*.out
