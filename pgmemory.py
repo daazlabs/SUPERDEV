@@ -43,7 +43,7 @@ def _vec_literal(v: list) -> str:
     return "[" + ",".join(repr(float(x)) for x in v) + "]"
 
 
-def store(texto: str, tenant_id: str = None, categoria: str = None) -> int:
+def store(texto: str, tenant_id: str | None = None, categoria: str | None = None) -> int:
     """Grava um facto novo. Devolve o id da linha criada."""
     tenant_id = tenant_id or config.TENANT_PADRAO
     emb = memory._embed(texto)
@@ -59,7 +59,9 @@ def store(texto: str, tenant_id: str = None, categoria: str = None) -> int:
     return novo_id
 
 
-def retrieve(query: str, tenant_id: str = None, categoria: str = None, k: int = None) -> list:
+def retrieve(
+    query: str, tenant_id: str | None = None, categoria: str | None = None, k: int | None = None,
+) -> list:
     """Devolve as k memórias mais relevantes PARA ESTE tenant (nunca
     mistura clientes), ordenadas por pontuação híbrida. Cada item:
     (score, id, texto) — mesma forma de memory.retrieve(), trocável.
@@ -89,10 +91,9 @@ def retrieve(query: str, tenant_id: str = None, categoria: str = None, k: int = 
         params["categoria"] = categoria
     sql += " ORDER BY embedding <=> %(qvec)s::vector LIMIT %(pool)s"
 
-    with _pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-            linhas = cur.fetchall()
+    with _pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        linhas = cur.fetchall()
 
     resultados = []
     for id_, texto, semantico, palavras in linhas:

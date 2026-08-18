@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import tools  # noqa: E402
+import tools
 
 # Mesmos 8 casos do B4 (ver teste-baseline-toolcalling.py) + extras.
 CASOS = [

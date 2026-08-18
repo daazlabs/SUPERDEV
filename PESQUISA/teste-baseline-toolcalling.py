@@ -23,8 +23,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import agent  # noqa: E402
-import tools  # noqa: E402
+import agent
+import tools
 
 REPETICOES = 5
 

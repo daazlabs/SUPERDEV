@@ -61,7 +61,13 @@ def main() -> None:
 
     revistas_agora = 0
     for troca in por_rever:
-        quando = datetime.datetime.fromtimestamp(troca["timestamp"]).strftime("%d %b %H:%M")
+        # hora local para o humano que está a rever, não UTC — daí o
+        # .astimezone() sem argumento depois de ancorar em UTC
+        quando = (
+            datetime.datetime.fromtimestamp(troca["timestamp"], tz=datetime.UTC)
+            .astimezone()
+            .strftime("%d %b %H:%M")
+        )
         marcas = ",".join(m for m, presente in (
             ("LIMITE", troca["bateu_limite"]), ("N1", troca["nivel1"]),
             ("N1.5", troca["nivel1_5"]), ("URLS", troca["urls"]),

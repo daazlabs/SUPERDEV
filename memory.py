@@ -21,7 +21,6 @@ import numpy as np
 
 import config
 
-
 _STOPWORDS_PT = {
     "a", "o", "as", "os", "de", "da", "do", "das", "dos", "e", "é", "que",
     "qual", "quais", "para", "por", "porque", "com", "sem", "um", "uma",
@@ -127,7 +126,7 @@ def _sync_index() -> dict:
     return index
 
 
-def retrieve(query: str, k: int = None) -> list:
+def retrieve(query: str, k: int | None = None) -> list:
     """Devolve as k memórias mais relevantes, ordenadas por pontuação
     híbrida (semelhança vectorial + sobreposição de palavras-chave).
 

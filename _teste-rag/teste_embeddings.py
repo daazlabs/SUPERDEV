@@ -4,6 +4,7 @@ Não faz parte do agente final — é só para validar antes de confiarmos nisto
 """
 import json
 import urllib.request
+
 import numpy as np
 
 OLLAMA = "http://localhost:11434/api/embeddings"
