@@ -655,13 +655,29 @@ def verificar_semantica(resposta: str, mensagens: list) -> str:
     if not fontes.strip():
         return resposta
 
+    # v3 (18 Ago 2026) — o v1 (julgamento holístico directo) falhava a
+    # apanhar números/percentagens fabricados dentro de um parágrafo
+    # maioritariamente correcto (0/4 em PESQUISA/teste-nivel2-semantica.py),
+    # mas era estável. Tentado v2 (raciocínio explícito em 3 passos) e
+    # DESFEZ-SE por completo: com think=False o modelo não tem "rascunho"
+    # invisível para filtrar entre os passos — devolvia o passo 1 inteiro
+    # (todas as frases, incluindo opiniões que o próprio prompt pedia
+    # para NÃO assinalar) como se fosse o resultado do passo 3. Multi-
+    # passo sem thinking não funciona neste modelo. v3 volta ao
+    # julgamento directo do v1, só acrescenta uma frase a apontar
+    # números/percentagens como categoria de atenção especial — sem
+    # pedir fases de raciocínio.
     prompt = (
         "Tarefa: verificação factual. FONTE é o resultado real de "
         "ferramentas. AFIRMAÇÃO é uma resposta que deve basear-se só na "
         "FONTE. Lista, em JSON (array de strings, [] se nenhuma), as "
         "frases da AFIRMAÇÃO que fazem uma alegação factual concreta "
-        "(número, comportamento, facto) NÃO suportada pela FONTE. Não "
-        "assinales opiniões, sugestões ou o que já está correcto.\n\n"
+        "(número, comportamento, facto) NÃO suportada pela FONTE. "
+        "Presta atenção especial a números e percentagens: cada um tem "
+        "de aparecer literalmente na FONTE ou ser calculável "
+        "directamente a partir dela — um número \"plausível\" não "
+        "chega. Não assinales opiniões, sugestões ou o que já está "
+        "correcto.\n\n"
         f"FONTE:\n{fontes}\n\nAFIRMAÇÃO:\n{resposta}"
     )
 

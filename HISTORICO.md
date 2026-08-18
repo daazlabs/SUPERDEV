@@ -2426,3 +2426,45 @@ corrigido e commitado (é uma correcção real independente da decisão
 de activar). A activação em si fica para depois de melhorar o prompt
 para o caso de estatística inventada — o utilizador preferiu não
 ligar já sabendo desta lacuna concreta.
+
+## Nível 2 — melhorado o prompt (v2 desfez-se, v3 resolveu) (18 Ago 2026)
+
+Seguimento directo da entrada anterior. Tentativa de resolver a
+lacuna concreta (estatística/número fabricado embutido num parágrafo
+maioritariamente correcto, 0/4 apanhado com o prompt original).
+
+**v2 — raciocínio explícito em 3 passos** ("identifica os factos" →
+"confirma cada um contra a FONTE" → "devolve só os não confirmados"):
+melhorou os casos adversariais (2/3 estatística, 2/2 comportamento,
+com 1 timeout a estragar a contagem), mas **desfez-se por completo**
+nos casos limpos — 4/4 falsos positivos, incluindo a marcar frases de
+OPINIÃO que o próprio prompt pedia para não assinalar. Diagnóstico: a
+resposta devolvida era literalmente a AFIRMAÇÃO inteira cortada em
+frases — o "passo 1" (identificar factos), não o "passo 3" (filtrar
+os não confirmados). Causa: `config.THINK=False` nesta chamada não dá
+ao modelo espaço de rascunho invisível para executar um raciocínio em
+fases; sem thinking, um 9B escreve o que já tinha identificado no
+primeiro passo e pronto. Multi-passo sem thinking não funciona neste
+modelo — achado a reter para qualquer prompt futuro nesta família de
+funções.
+
+**v3 — julgamento directo (like v1) + 1 frase de atenção a números**:
+mantém a estrutura holística do v1 (sem fases), só acrescenta "Presta
+atenção especial a números e percentagens: cada um tem de aparecer
+literalmente na FONTE ou ser calculável directamente a partir dela —
+um número 'plausível' não chega." Resultado — bateria de 9 chamadas
+(3× estatística inventada, 2× comportamento inventado, 2× fiel, 2×
+opinião): **9/9 correcto**. Latência muito mais baixa que nas sessões
+anteriores (0.7s-8.8s vs. 25-90s+) — a máquina estava com menos
+contenção nesta altura, confirma que a lentidão observada antes era
+mesmo dos outros serviços a partilhar a Ollama, não do prompt em si.
+Conteúdo das duas capturas confirmado à mão: a de "estatística
+inventada" assinalou exactamente as 2 frases fabricadas, nada mais; a
+de "comportamento inventado" assinalou as frases certas com 1
+imprecisão menor (incluiu de arrasto uma frase verdadeira rodeada de
+frases falsas — não muda o veredicto da resposta).
+
+**Decisão**: prompt v3 commitado, `NIVEL2_ATIVO` continua `False`. Só
+uma bateria de 9/9 (n pequeno, um momento de pouca carga) — o
+utilizador preferiu mais confirmação antes de ligar em produção do
+que activar já a partir de um resultado único, por bom que tenha sido.
