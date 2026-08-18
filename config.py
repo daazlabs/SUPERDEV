@@ -461,9 +461,15 @@ POOL_CANDIDATOS_SEMANTICOS = 50
 # Verifica se o CONTEÚDO em prosa livre da resposta (percentagens,
 # afirmações de comportamento, resumos) bate com o que a ferramenta
 # devolveu — não só "foi citada/chamada" (isso já é o Nível 1/1.5).
-# Dobra o custo por resposta (2ª chamada ao modelo), por isso fica
-# desligado por omissão — liga-se para testar.
-NIVEL2_ATIVO = False
+# Dobra o custo por resposta (2ª chamada ao modelo).
+#
+# LIGADO A SÉRIO 18 Ago 2026, a pedido do utilizador, depois de:
+# separado o mecanismo em mecânico (percentagens, ~0 custo, sempre
+# activo) + LLM (comportamento, ~93% medido em ~30 chamadas); e de
+# verificar_semantica/verificar_numeros_percentagens passarem a
+# CORTAR o não confirmado do texto (_redigir), não só avisar — ver
+# HISTORICO.md desta data para o histórico completo de testes.
+NIVEL2_ATIVO = True
 # Respostas curtas/triviais não valem a pena o custo — só corre em
 # respostas com texto suficiente para conter afirmações factuais reais.
 NIVEL2_MIN_CHARS = 400
