@@ -2383,3 +2383,46 @@ de identidade no código (CORE_IDENTITY, avisos de verificacoes.py,
 User-Agent, banners). As entradas anteriores deste ficheiro NÃO foram
 reescritas — usavam o nome antigo porque era esse o nome nessa altura,
 mantém-se histórico e correcto assim.
+
+## Testado o Nível 2 pela primeira vez — bug real apanhado, fica desligado (18 Ago 2026)
+
+O commit 74f74e8 (17 Ago) tinha implementado o Nível 2 (verificação
+semântica de conteúdo) mas deixado por fazer, ao próprio, "activar
+NIVEL2_ATIVO numa sessão de teste e validar". Escrito
+`PESQUISA/teste-nivel2-semantica.py` (mesmo estilo dos outros testes
+da pasta): 4 testes de gatilho (determinísticos) + 4 semânticos
+(chamam o Ollama a sério, `NIVEL2_ATIVO` ligado só dentro do processo
+do teste, nunca no `config.py`).
+
+**Bug real encontrado**: `verificar_semantica()` nunca enviava
+`"think"` ao Ollama — ao contrário de todos os outros pedidos em
+`agent.py`, que passam sempre `"think": config.THINK` (False). Sem
+isso a Ollama usa thinking por omissão, que o próprio `config.py` já
+media em ~19s só para pensar antes de responder a uma frase trivial.
+Com o timeout de 30s da função, a verificação falhava silenciosamente
+por timeout com alguma frequência — não por o modelo julgar mal, mas
+por nunca chegar a responder a tempo (apanhado pelo `except Exception`
+genérico, sem aviso nenhum). Corrigido: `"think": config.THINK`
+adicionado, timeout subido de 30s para 90s.
+
+**Mesmo corrigido, a latência continua instável neste sistema**
+(vários outros serviços a partilhar a mesma máquina/Ollama —
+superleads, superllmapi, agent-sovereign): 3 repetições dos 2 casos
+adversariais deram 25.2s, 32.0s, 33.3s, 59.7s, e duas em 90.1s exactos
+(bateram no novo tecto). Excluindo os timeouts:
+
+- "Comportamento inventado" (contradiz a fonte, ex.: "todos os 22
+  erros foram corrigidos sozinhos") — **2/2 apanhado**, sem falsos
+  positivos nos casos limpos (resposta fiel, resposta com opinião por
+  cima do resumo fiel).
+- "Estatística inventada" (percentagem/facto fabricado embutido num
+  parágrafo maioritariamente correcto, ex.: "63% eram BLE001") —
+  **0/2 apanhado**, falha sistemática — o prompt actual não empurra o
+  modelo a verificar cada número isoladamente, só julga o parágrafo
+  como um todo.
+
+**Decisão**: fica `NIVEL2_ATIVO = False`. O bug do timeout/think foi
+corrigido e commitado (é uma correcção real independente da decisão
+de activar). A activação em si fica para depois de melhorar o prompt
+para o caso de estatística inventada — o utilizador preferiu não
+ligar já sabendo desta lacuna concreta.

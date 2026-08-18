@@ -670,6 +670,7 @@ def verificar_semantica(resposta: str, mensagens: list) -> str:
             "model": config.MODEL,
             "messages": [{"role": "user", "content": prompt}],
             "options": config.OPTIONS,
+            "think": config.THINK,
             "stream": False,
         }).encode()
         req = urllib.request.Request(
@@ -677,7 +678,14 @@ def verificar_semantica(resposta: str, mensagens: list) -> str:
             data=body,
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=30) as r:
+        # 90s, não os 30s originais — medido ao vivo (18 Ago 2026,
+        # PESQUISA/teste-nivel2-semantica.py) mesmo com think=False:
+        # 5.6s-68s para estes prompts com o modelo já quente em VRAM,
+        # sem contar o arranque a frio do ollama-idle-manager. Com 30s
+        # a verificação falhava por timeout com alguma frequência —
+        # não por o modelo julgar mal, mas por nunca chegar a responder
+        # a tempo (apanhado pelo except abaixo, sem aviso nenhum).
+        with urllib.request.urlopen(req, timeout=90) as r:
             data = json.loads(r.read())
         texto_modelo = (data.get("message", {}).get("content") or "").strip()
         # O modelo nem sempre devolve JSON puro apesar de pedido no
