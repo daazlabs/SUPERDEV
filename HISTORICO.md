@@ -1,4 +1,4 @@
-# Histórico de implementação — SUPERDEV
+# Histórico de implementação — SUPERLLMLOCAL
 
 Registo do que foi construído e porquê, por ordem cronológica. Só entra
 aqui o que já está feito e testado — não planos nem próximos passos.
