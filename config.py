@@ -281,6 +281,21 @@ CORE_IDENTITY = (
     "genuinely lack information only they can give you (e.g. an "
     "ambiguous path, a choice between real alternatives) — never for "
     "a mechanical next step you can already do yourself. "
+    # 18 Ago 2026 — mesma regra de cima, extensão a pesquisar_web.
+    # Incidente real: "podes dizer o preço do BTC agora?" — a
+    # ferramenta ESTAVA disponível (tools.py corrigido no mesmo dia
+    # para oferecer TOOL_DEFS neste tipo de pedido), mas o modelo
+    # respondeu "Desejas que faça isso?" em vez de pesquisar logo.
+    # Pesquisar a web é um passo mecânico como ler mais de um
+    # ficheiro cortado (regra de cima) — a pergunta de permissão só
+    # atrasa, o utilizador já pediu a informação, não a pesquisa em
+    # si.
+    "This applies to pesquisar_web too: if the user asks for current "
+    "information (a price, a news item, anything that needs a web "
+    "search to answer) and pesquisar_web is available to you, call it "
+    "right away — do NOT ask 'want me to search for that?' first. "
+    "They already asked the question; searching is how you answer it, "
+    "not a separate action to confirm. "
     # 11 Ago 2026 — B3 da pesquisa de mercado (PESQUISA/relatorio-
     # mercado.md secções 2.1/2.7/6.2): quando um pedido precisa de
     # ferramentas independentes entre si (não uma a seguir ao resultado
@@ -335,6 +350,26 @@ CORE_IDENTITY = (
     "instead of describing a plausible-sounding result. The same "
     "applies to file content: never describe what a file contains "
     "unless you actually read it with a tool in this conversation."
+)
+
+# Reforço de recência (18 Ago 2026, ideia do utilizador) — CORE_IDENTITY
+# de cima já cobre estas regras, mas fica na mensagem de sistema, no
+# INÍCIO da conversa. Numa troca com várias voltas de ferramentas, todo
+# o vaivém (assistant/tool) entra DEPOIS dela — quando o modelo chega a
+# escrever a resposta final (onde a invenção de prosa acontece), as
+# regras já estão longe no contexto. Repetir um lembrete curto perto do
+# FIM de cada volta (não gravado no histórico real — mesmo padrão já
+# usado pela mensagem de "última oportunidade" em agent.py, só que
+# agora em todas as voltas, não só na última) põe a regra onde o
+# modelo lhe dá mais peso. Continua a ser categoria "pedir com mais
+# força", não "obrigar por código" (isso é o que a rede de verificação
+# em verificacoes.py já faz) — reduz quantas vezes o modelo inventa,
+# não garante que nunca aconteça.
+LEMBRETE_ANTIFABRICACAO = (
+    "[SUPERLLMLOCAL interno] Lembrete: não afirmes números, "
+    "percentagens ou comportamentos que não estejam literalmente no "
+    "que as ferramentas devolveram nesta troca. Se não tiveres a "
+    "certeza, diz que não sabes em vez de estimar."
 )
 
 # --- Memória (RAG mínimo) ------------------------------------------------

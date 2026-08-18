@@ -2528,3 +2528,63 @@ bloqueio (só entrega as partes confirmadas). Fica para decidir numa
 sessão seguinte — o utilizador quis primeiro explorar mais ideias
 (reforço de instruções perto do turno do utilizador; mais uso de
 pesquisa web) antes de escolher.
+
+## Reforço de recência + bug real de pesquisa_web nunca oferecida (18 Ago 2026)
+
+Seguimento directo. Duas peças pequenas, a segunda motivada por um
+incidente real ao vivo.
+
+**1. Reforço de recência** (ideia do utilizador): `CORE_IDENTITY`
+fica na mensagem de sistema, no início da conversa — numa troca com
+várias voltas de ferramentas, todo o vaivém entra depois dele, e a
+regra "fica longe" no contexto quando o modelo escreve a resposta
+final. Nova constante `config.LEMBRETE_ANTIFABRICACAO`, injectada
+como mensagem transitória (não gravada no histórico — mesmo padrão já
+usado pela mensagem de "última oportunidade") no FIM de TODAS as
+voltas, não só a última. Categoria "pedir com mais força", não
+"obrigar por código" — reduz, não garante, mesma ressalva de sempre.
+Efeito colateral apanhado e corrigido no mesmo commit: o campo de log
+`pedido_tamanho_chars` olhava para `messages[-1]`, que passou a ser
+sempre o lembrete — `_ultima_msg_real` em `agent.py` agora ignora
+mensagens `[SUPERLLMLOCAL interno]` ao calcular isto.
+
+**2. Incidente real, ao vivo**: o utilizador perguntou directamente
+ao agente "podes dizer o preço do BTC agora?" e recebeu "Não tenho
+acesso a dados em tempo real. Não pesquisei a web para obter o preço
+atual do BTC nesta conversa." Investigado: NÃO foi o modelo a
+escolher não pesquisar — `tools.provavelmente_precisa_ferramentas()`
+(filtro mecânico de palavras-chave que decide SE `TOOL_DEFS` é
+sequer anexado ao pedido) não reconheceu a frase. A categoria "web"
+só tinha frases específicas ("actual", "hoje em dia") e nenhuma
+palavra sobre preço/valor em si. Confirmado com o pedido exacto:
+`provavelmente_precisa_ferramentas("podes dizer o preço do btc
+agora?")` → `False`. `pesquisar_web` nunca chegou a ser oferecido —
+o aviso do modelo estava correcto (seguiu a regra de admitir que não
+pesquisou em vez de inventar um preço), só que a causa raiz era não
+ter sequer a ferramenta disponível.
+
+Corrigido em `tools.py`, categoria "web": acrescentadas palavras de
+INTENÇÃO de preço ("preço", "quanto custa", "quanto vale",
+"cotação", "valor de mercado") — não nomes de produtos. O
+utilizador corrigiu a minha primeira proposta (que era acrescentar
+"bitcoin"/"btc"/"cripto"): o padrão real é "perguntar o preço de
+qualquer coisa agora", não uma categoria de activo específica — a
+mesma frase serve para "preço da RTX 3090 hoje" como para BTC.
+Testado com 7 casos (os 2 pedidos reais + regressão): 7/7 OK.
+
+Testado ao vivo com `agent.responder()`, o pedido exacto do
+utilizador, duas vezes:
+- 1ª vez (só o filtro corrigido): `tinha_ferramentas=True` no log
+  (confirma o fix), mas o modelo respondeu "Desejas que faça isso?"
+  em vez de pesquisar — `pediu_ferramenta=False`. 2º problema
+  apanhado: o `CORE_IDENTITY` já tinha uma regra contra pedir
+  permissão para passos mecânicos (ex.: continuar a ler um ficheiro
+  cortado, 10 Ago), mas não cobria `pesquisar_web`.
+- Estendida a mesma regra a `pesquisar_web` explicitamente
+  (`config.py`, CORE_IDENTITY). Testado outra vez: o modelo chamou
+  `pesquisar_web({"query": "preço atual do Bitcoin BTC agora"})` sem
+  perguntar — confirmado nos 3 registos do log desta troca. A
+  pesquisa em si não devolveu dados úteis de preço (limitação do
+  motor de pesquisa por trás, fora do âmbito de hoje), e o modelo
+  admitiu isso em vez de inventar um número — a rede anti-
+  confabulação funcionou correctamente no fim da cadeia também.

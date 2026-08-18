@@ -117,10 +117,20 @@ def ollama_chat(
     # Regista tudo o que a Ollama nos dá de graça e que estávamos a
     # deitar fora: tokens de prompt vs. geração, tempos de cada fase,
     # e o que decidimos nós (options, think, memórias trazidas).
+    #
+    # _ultima_msg_real ignora os lembretes transitórios injectados no
+    # fim de mensagens_desta_chamada (18 Ago 2026, ver LEMBRETE_
+    # ANTIFABRICACAO/"última oportunidade" em responder()) — sem isto,
+    # messages[-1] passaria a ser sempre o lembrete, não o pedido real,
+    # e pedido_tamanho_chars ficava sempre com o mesmo tamanho fixo.
+    _ultima_msg_real = next(
+        (m for m in reversed(messages) if not (m.get("content") or "").startswith("[SUPERLLMLOCAL interno]")),
+        messages[-1] if messages else {},
+    )
     _log({
         "timestamp": time.time(),
         "commit": _COMMIT_ATUAL,
-        "pedido_tamanho_chars": len(messages[-1]["content"]) if messages[-1].get("content") else 0,
+        "pedido_tamanho_chars": len(_ultima_msg_real.get("content") or ""),
         "system_tamanho_chars": len(messages[0]["content"]) if messages and messages[0]["role"] == "system" else 0,
         "memorias_usadas": memorias_usadas or [],
         "tinha_ferramentas": bool(ferramentas),
@@ -445,9 +455,16 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
         # adivinhar. Resultado: quase nunca mais um erro seco, sempre
         # uma resposta com alguma coisa aproveitável.
         ultima_volta = i == max_voltas - 1
-        mensagens_desta_chamada = mensagens
+        # Lembrete anti-fabricação repetido em TODAS as voltas (18 Ago
+        # 2026, ver config.py) — transitório, tal como a mensagem de
+        # "última oportunidade" abaixo: só entra em mensagens_desta_
+        # chamada, nunca em mensagens, por isso não fica gravado no
+        # histórico nem se acumula entre pedidos.
+        mensagens_desta_chamada = mensagens + [
+            {"role": "user", "content": config.LEMBRETE_ANTIFABRICACAO},
+        ]
         if ultima_volta:
-            mensagens_desta_chamada = mensagens + [{
+            mensagens_desta_chamada.append({
                 "role": "user",
                 "content": (
                     "[SUPERLLMLOCAL interno] Esta é a tua última oportunidade "
@@ -456,7 +473,7 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
                     "acima. Se faltar algo para responder por completo, "
                     "diz isso explicitamente em vez de adivinhar."
                 ),
-            }]
+            })
         mensagem, done_reason = ollama_chat(
             mensagens_desta_chamada,
             ferramentas=None if (ultima_volta or not precisa_ferramentas) else tools.TOOL_DEFS,

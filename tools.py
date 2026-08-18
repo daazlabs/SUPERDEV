@@ -763,6 +763,20 @@ CATEGORIAS_PEDIDO_FERRAMENTAS = {
         "pesquisa na web", "pesquisa online", "internet", "notícia",
         "notícias", "actual", "atual", "hoje em dia", "últimas", "site",
         "página web", "url", "http",
+        # 18 Ago 2026 — incidente real: "podes dizer o preço do BTC
+        # agora?" não batia em nada da lista (nem "actual" nem "hoje em
+        # dia" aparecem nessa frase), TOOL_DEFS nunca foi anexado,
+        # pesquisar_web nunca foi sequer oferecido — e o modelo,
+        # correctamente por CORE_IDENTITY, admitiu que não tinha
+        # pesquisado em vez de inventar um preço. A causa não é
+        # "bitcoin" — é qualquer pedido de preço/valor actual de
+        # qualquer coisa (uma placa gráfica, ouro, uma acção...).
+        # Palavras de INTENÇÃO (preço, quanto custa), não nomes de
+        # produtos — não dá para enumerar produtos, dá para enumerar
+        # como se pergunta um preço.
+        "preço", "preços", "preco", "precos", "quanto custa",
+        "quanto custam", "quanto vale", "quanto valem", "cotação",
+        "cotacao", "valor de mercado",
     ),
 }
 
