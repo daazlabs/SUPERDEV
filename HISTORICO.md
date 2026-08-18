@@ -2588,3 +2588,37 @@ utilizador, duas vezes:
   motor de pesquisa por trás, fora do âmbito de hoje), e o modelo
   admitiu isso em vez de inventar um número — a rede anti-
   confabulação funcionou correctamente no fim da cadeia também.
+
+## Fecha a discussão em aberto: redacção automática no Nível 2 (18 Ago 2026)
+
+Decisão do utilizador sobre a discussão de arquitectura ("só assinala
+não chega, quero ter confiança sem ter de confirmar cada resposta"):
+redacção automática. `verificacoes.py`: nova `_redigir()`, EXCEPÇÃO
+deliberada ao princípio "nunca corrige" repetido em todas as outras
+`verificar_*` — cortar é subtractivo (nunca inventa uma correcção, só
+remove o que já foi identificado como não confirmado), por isso não
+tem o mesmo risco de uma 2ª camada de confabulação a "consertar" a
+1ª. Aplicado só a `verificar_numeros_percentagens` e
+`verificar_semantica` (as 2 peças testadas hoje) — Nível 1/1.5
+continuam só a assinalar, já perto de 100% fiáveis.
+
+**Bug real apanhado na 1ª versão**: cortar cada frase isoladamente
+por substituição sequencial, quando o Nível 2 assinala 5-6 frases
+quase seguidas (caso real: `comportamento_inventado`), deixava só
+pontuação solta entre marcadores — "[removido] — [removido], e
+[removido]", ilegível. Corrigido: `_redigir()` passou a trabalhar por
+POSIÇÃO (spans) em vez de substituição sequencial — funde cortes
+vizinhos (separados só por pontuação/espaço, até 6 chars) num
+marcador só; e ganhou uma rede de segurança — se sobrar menos de 40
+chars de texto legível fora dos marcadores, troca tudo por uma frase
+honesta ("Não tenho uma resposta fiável para isto...") em vez de
+devolver fragmentos soltos. Testado deterministicamente (sem Ollama)
+e depois ao vivo: `PESQUISA/teste-nivel2-semantica.py` 10/10.
+
+**Risco residual, não resolvido, documentado para decisão futura**: o
+falso positivo já conhecido do Nível 2 (~11%, a opinião assinalada
+por engano como facto não suportado) agora tem custo mais alto — antes
+só acrescentava um aviso a mais; agora pode CORTAR uma frase legítima
+do texto. A corrida de hoje não repetiu o falso positivo (10/10), mas
+a taxa de base não mudou — é um risco aceite ao escolher redacção em
+vez de bloqueio/regeneração, não eliminado por este commit.

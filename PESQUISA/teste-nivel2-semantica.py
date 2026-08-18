@@ -230,7 +230,7 @@ def teste_resposta_fiel() -> bool:
     ok = not disparou
     print(f"  {'OK' if ok else 'FALHOU'} — disparou: {disparou}")
     if disparou:
-        print(f"  Aviso: {r[len(RESPOSTA_FIEL):]}")
+        print(f"  Resultado: {r}")
     return ok
 
 
@@ -242,7 +242,7 @@ def teste_estatistica_inventada() -> bool:
     ok = disparou
     print(f"  {'OK' if ok else 'FALHOU'} — disparou: {disparou}")
     if disparou:
-        print(f"  Aviso: {r[len(RESPOSTA_ESTATISTICA_INVENTADA):]}")
+        print(f"  Resultado: {r}")
     return ok
 
 
@@ -254,7 +254,7 @@ def teste_comportamento_inventado() -> bool:
     ok = disparou
     print(f"  {'OK' if ok else 'FALHOU'} — disparou: {disparou}")
     if disparou:
-        print(f"  Aviso: {r[len(RESPOSTA_COMPORTAMENTO_INVENTADO):]}")
+        print(f"  Resultado: {r}")
     return ok
 
 
@@ -266,7 +266,7 @@ def teste_opiniao_nao_dispara() -> bool:
     ok = not disparou
     print(f"  {'OK' if ok else 'FALHOU'} — disparou: {disparou}")
     if disparou:
-        print(f"  Aviso: {r[len(RESPOSTA_COM_OPINIAO):]}")
+        print(f"  Resultado: {r}")
     return ok
 
 

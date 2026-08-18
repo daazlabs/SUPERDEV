@@ -15,17 +15,27 @@ Isso é o que torna este módulo reaproveitável por cópia noutro agente
 que fale com um modelo diferente por um protocolo diferente (ver
 SUPERLLMAPI) sem precisar de reescrever nada aqui.
 
-Convenção: as 6 funções `verificar_*` são a API pública deste módulo
+Convenção: as 8 funções `verificar_*` são a API pública deste módulo
 (chamadas de fora, ex. agent.responder()) — sem underscore inicial,
 ao contrário de quando viviam dentro de agent.py como detalhe de
 implementação. Os helpers e as constantes de regex continuam privados
 ao módulo (underscore mantido).
 
 Todas têm a mesma forma: `(resposta: str, mensagens: list) -> str` —
-devolvem a resposta tal e qual se nada houver a assinalar, ou a
-resposta com um aviso "[SUPERLLMLOCAL — ...]" acrescentado no fim. Nunca
-corrigem nem bloqueiam, só tornam a suspeita visível — mesmo princípio
-em todas, repetido em cada docstring.
+devolvem a resposta tal e qual se nada houver a assinalar. As 6 mais
+antigas (Nível 1/1.5, URLs, fontes nomeadas, ficheiros citados,
+existência contraditada) só acrescentam um aviso "[SUPERLLMLOCAL —
+...]" no fim, nunca corrigem nem bloqueiam — mesmo princípio em
+todas, repetido em cada docstring.
+
+EXCEPÇÃO (18 Ago 2026, ver _redigir e HISTORICO.md): as 2 mais
+recentes, verificar_numeros_percentagens e verificar_semantica,
+CORTAM as frases não confirmadas do texto em vez de só avisar —
+decisão discutida com o utilizador: um aviso pendurado no fim ainda
+exigia leitura manual de cada resposta. Cortar continua seguro porque
+é subtractivo (nunca inventa uma correcção, só remove o que já foi
+identificado como não confirmado) — nada aqui pede ao modelo para
+"consertar" nada.
 
 Custo: ~0 em todas (regex + comparação de string, nenhuma chamada
 extra ao modelo) — só correm depois de já termos a resposta final.
@@ -614,16 +624,106 @@ def verificar_existencia_ficheiros(resposta: str, mensagens: list) -> str:
 _PADRAO_PERCENTAGEM = re.compile(r"(\d+(?:[.,]\d+)?)\s?%")
 
 
+# Redacção automática (18 Ago 2026) — EXCEPÇÃO deliberada ao princípio
+# repetido em todas as outras verificar_* deste módulo ("nunca
+# corrige, só assinala"). Discutido com o utilizador (ver HISTORICO.md):
+# um aviso pendurado no fim do texto ainda exige leitura manual de
+# cada resposta para ter confiança — não resolve "não quero ter de
+# confirmar cada resposta". A diferença chave que torna isto seguro
+# aqui e não nas outras verificações: cortar é SUBTRACTIVO, nunca
+# inventa uma correcção — só remove o que já identificámos como não
+# confirmado (por comparação de string ou julgamento do Nível 2), o
+# modelo não é chamado outra vez para "consertar" nada. Só usado por
+# verificar_numeros_percentagens e verificar_semantica (as duas peças
+# testadas hoje) — Nível 1/1.5 continuam só a assinalar, já são quase
+# 100% fiáveis e não foram tocadas nesta mudança.
+_MARCADOR_CORTE = "[removido — não confirmado na fonte]"
+_TOLERANCIA_FUSAO = 6  # chars de separador (", ", " — ", ". ") para fundir cortes vizinhos
+_MIN_LEGIVEL = 40  # abaixo disto, o que sobra não é uma resposta útil
+
+
+def _redigir(resposta: str, frases: list[str], titulo: str) -> str:
+    """Corta cada item de `frases` do texto de `resposta`, substituindo
+    por um marcador curto — só quando o texto aparece LITERALMENTE em
+    `resposta` (substring exacta). O Nível 2 é um LLM a citar frases,
+    não garantido a reproduzi-las ao pé da letra; o que não bater
+    certo fica de fora do corte (não cortamos às cegas o que não
+    sabemos localizar) e aparece à parte no rodapé, mesmo
+    comportamento de aviso que já existia.
+
+    Trabalha por POSIÇÃO (spans), não por substituição sequencial —
+    quando o Nível 2 assinala várias frases seguidas (caso real
+    testado: 5-6 frases de um parágrafo fabricado), cortar cada uma
+    isoladamente deixava só pontuação solta entre marcadores
+    ("[removido] — [removido], e [removido]"), ilegível. Cortes
+    vizinhos (separados só por pontuação/espaço, até
+    _TOLERANCIA_FUSAO chars) fundem-se num marcador só.
+
+    Rede de segurança: se sobrar menos de _MIN_LEGIVEL chars de texto
+    fora dos marcadores, o resto não é uma resposta útil — troca tudo
+    por uma frase honesta em vez de devolver fragmentos soltos."""
+    spans = []
+    cortadas = []
+    for frase in frases:
+        frase = frase.strip()
+        if not frase:
+            continue
+        pos = resposta.find(frase)
+        if pos != -1:
+            spans.append((pos, pos + len(frase)))
+            cortadas.append(frase)
+    nao_localizadas = [f.strip() for f in frases if f.strip() and f.strip() not in cortadas]
+
+    if spans:
+        spans.sort()
+        fundidos = [spans[0]]
+        for inicio, fim in spans[1:]:
+            if inicio <= fundidos[-1][1] + _TOLERANCIA_FUSAO:
+                fundidos[-1] = (fundidos[-1][0], max(fundidos[-1][1], fim))
+            else:
+                fundidos.append((inicio, fim))
+
+        partes = []
+        cursor = 0
+        for inicio, fim in fundidos:
+            partes.append(resposta[cursor:inicio])
+            partes.append(_MARCADOR_CORTE)
+            cursor = fim
+        partes.append(resposta[cursor:])
+        texto = re.sub(r"[ \t]{2,}", " ", "".join(partes)).strip()
+
+        texto_legivel = re.sub(re.escape(_MARCADOR_CORTE), "", texto).strip()
+        if len(texto_legivel) < _MIN_LEGIVEL:
+            texto = (
+                "Não tenho uma resposta fiável para isto — a maior parte "
+                "do que ia responder não está confirmada no que as "
+                "ferramentas devolveram nesta troca."
+            )
+    else:
+        texto = resposta
+
+    linhas = [f"\n\n---\n[SUPERLLMLOCAL — {titulo}]"]
+    if cortadas:
+        linhas.append("✂️ Removido do texto (não confirmado): " + "; ".join(cortadas))
+    if nao_localizadas:
+        linhas.append(
+            "⚠️ Assinalado mas não localizado no texto para remover "
+            "automaticamente: " + "; ".join(nao_localizadas)
+        )
+    return texto + "\n".join(linhas)
+
+
 def verificar_numeros_percentagens(resposta: str, mensagens: list) -> str:
     """Confere se cada percentagem citada na resposta aparece
-    literalmente no resultado real das ferramentas desta troca.
+    literalmente no resultado real das ferramentas desta troca — as
+    que não aparecem são CORTADAS do texto (ver _redigir acima).
 
     Só confirma presença LITERAL — uma percentagem calculada
     correctamente a partir de números reais da fonte (ex.: "6 de 22
     ≈ 27%") mas que a fonte não escreve por extenso também dispara
     aqui. Limitação deliberada: entre confiar num cálculo não
-    verificável e assinalar de mais, prefere-se assinalar — o custo é
-    só um aviso, nunca bloqueia (mesmo princípio de todas as outras)."""
+    verificável e cortar de mais, prefere-se cortar — o custo é uma
+    frase a menos, nunca uma frase inventada."""
     numeros = {m.group(1) for m in _PADRAO_PERCENTAGEM.finditer(resposta)}
     if not numeros:
         return resposta
@@ -642,12 +742,7 @@ def verificar_numeros_percentagens(resposta: str, mensagens: list) -> str:
     if not nao_confirmadas:
         return resposta
 
-    aviso = (
-        "\n\n---\n[SUPERLLMLOCAL — percentagem não confirmada]\n"
-        "⚠️ Estas percentagens não aparecem literalmente no resultado "
-        "real das ferramentas desta troca: " + "; ".join(nao_confirmadas)
-    )
-    return resposta + aviso
+    return _redigir(resposta, nao_confirmadas, "percentagem não confirmada")
 
 
 # Verificação semântica de conteúdo (17 Ago 2026) — Nível 2 do plano
@@ -685,8 +780,10 @@ def verificar_numeros_percentagens(resposta: str, mensagens: list) -> str:
 def verificar_semantica(resposta: str, mensagens: list) -> str:
     """Verifica se o conteúdo em prosa livre da resposta (afirmações
     factuais concretas) é suportado pelo que as ferramentas desta troca
-    realmente devolveram. Não corrige — mesmo princípio do Nível 1:
-    torna a suspeita visível, utilizador decide.
+    realmente devolveram. CORTA as frases não suportadas do texto
+    (ver _redigir, 18 Ago 2026) — excepção deliberada ao "só assinala"
+    do resto deste módulo: cortar é subtractivo, nunca inventa uma
+    correcção, só remove o que o próprio julgamento já identificou.
 
     Só corre quando NIVEL2_ATIVO está ligado. Em caso de dúvida (JSON
     do modelo inválido, erro de rede, timeout) devolve a resposta
@@ -783,8 +880,4 @@ def verificar_semantica(resposta: str, mensagens: list) -> str:
     if not nao_suportadas:
         return resposta
 
-    aviso = (
-        "\n\n---\n[SUPERLLMLOCAL — verificação semântica Nível 2]\n"
-        "⚠️ Não confirmado na fonte: " + "; ".join(nao_suportadas)
-    )
-    return resposta + aviso
+    return _redigir(resposta, nao_suportadas, "verificação semântica Nível 2")
