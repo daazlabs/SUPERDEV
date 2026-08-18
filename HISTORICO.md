@@ -2622,3 +2622,33 @@ só acrescentava um aviso a mais; agora pode CORTAR uma frase legítima
 do texto. A corrida de hoje não repetiu o falso positivo (10/10), mas
 a taxa de base não mudou — é um risco aceite ao escolher redacção em
 vez de bloqueio/regeneração, não eliminado por este commit.
+
+## Filtra TOOL_DEFS por categoria — poupa tokens do "menu" de ferramentas (18 Ago 2026)
+
+Ideia do utilizador, motivada pela conversa sobre custo de tokens: o
+filtro `provavelmente_precisa_ferramentas()` já decidia SE oferecer
+ferramentas, mas era tudo-ou-nada — qualquer categoria a bater
+mandava as 7 ferramentas inteiras (~968 tokens, medido). Um pedido só
+de preço ("podes dizer o preço do BTC agora?") não precisa de
+`ler_ficheiro`/`correr_ruff`/etc., só de `pesquisar_web`.
+
+`tools.py`: `categorias_pedido()` (novo, devolve o CONJUNTO de
+categorias que bateram, não só a contagem — `contar_categorias_
+ferramentas()` passou a reaproveitar isto, comportamento inalterado);
+`FERRAMENTAS_POR_CATEGORIA` (mapa categoria → ferramentas, um pouco
+generoso onde há sobreposição real entre "código" e "ficheiro", mesma
+disciplina de sempre); `filtrar_tool_defs()` (novo — só as ferramentas
+das categorias detectadas; devolve TUDO se não detectar nada, pende
+para oferecer a mais nunca a menos). `agent.py`: `responder()` calcula
+`ferramentas_do_pedido` uma vez por pedido (como já fazia com
+`precisa_ferramentas`) e passa isso a `ollama_chat()` em vez de
+`tools.TOOL_DEFS`.
+
+Medido: pedido de preço → só `pesquisar_web`, ~115 tokens (-88%);
+pedido de ficheiro → 5 ferramentas, ~738 tokens (-24%); pedido de
+ruff → 6 ferramentas, ~853 tokens (-12%). `PESQUISA/teste-filtro-
+tooldefs.py` sem regressão (15/15). Testado ao vivo com
+`agent.responder()` — pedido de preço do BTC com só `pesquisar_web`
+disponível: chamou a ferramenta correctamente, resposta honesta
+(pesquisa sem resultados) — igual ao comportamento antes do filtro,
+mais barato.

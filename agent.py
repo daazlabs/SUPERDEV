@@ -435,6 +435,14 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
     # já está na lista, mas "e o resto?" só se apanha assim).
     contexto_janela = " ".join((m.get("content") or "") for m in janela)
     precisa_ferramentas = tools.provavelmente_precisa_ferramentas(pedido, contexto_janela)
+    # Filtro por categoria (18 Ago 2026, ideia do utilizador) — em vez
+    # de oferecer sempre as 7 ferramentas (~968 tokens, medido) quando
+    # precisa_ferramentas é True, só as da(s) categoria(s) que o
+    # pedido parece tocar (ex.: um pedido só de preço manda só
+    # pesquisar_web, ~115 tokens). Calculado uma vez por pedido, como
+    # precisa_ferramentas acima — TOOL_DEFS inteiro como fallback
+    # dentro de filtrar_tool_defs() se a categoria não cobrir nada.
+    ferramentas_do_pedido = tools.filtrar_tool_defs(pedido, contexto_janela) if precisa_ferramentas else None
     max_voltas = _calcular_orcamento_voltas(pedido, contexto_janela)
 
     resposta = None
@@ -476,7 +484,7 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
             })
         mensagem, done_reason = ollama_chat(
             mensagens_desta_chamada,
-            ferramentas=None if (ultima_volta or not precisa_ferramentas) else tools.TOOL_DEFS,
+            ferramentas=None if ultima_volta else ferramentas_do_pedido,
             memorias_usadas=memorias_usadas,
             filtro_ferramentas=precisa_ferramentas,
         )

@@ -806,6 +806,20 @@ def provavelmente_precisa_ferramentas(pedido: str, contexto_extra: str = "") -> 
     return any(termo in texto for termo in PALAVRAS_CHAVE_FERRAMENTAS)
 
 
+def categorias_pedido(pedido: str, contexto_extra: str = "") -> set:
+    """QUAIS categorias (chaves de CATEGORIAS_PEDIDO_FERRAMENTAS) o
+    pedido parece tocar — mesmo critério de contar_categorias_
+    ferramentas (que agora reaproveita isto), só que devolve o
+    conjunto, não a contagem. Usado por filtrar_tool_defs() para saber
+    que ferramentas oferecer."""
+    texto = f"{pedido} {contexto_extra}".lower()
+    return {
+        categoria
+        for categoria, palavras in CATEGORIAS_PEDIDO_FERRAMENTAS.items()
+        if any(termo in texto for termo in palavras)
+    }
+
+
 def contar_categorias_ferramentas(pedido: str, contexto_extra: str = "") -> int:
     """Quantas categorias DISTINTAS de ferramenta (ficheiro/código/web)
     o pedido parece tocar — não SE precisa de ferramentas (isso é
@@ -815,9 +829,39 @@ def contar_categorias_ferramentas(pedido: str, contexto_extra: str = "") -> int:
     tende a fechar-se depressa, um que fala de ficheiros E web precisa
     de mais idas-e-voltas para chegar às duas coisas — é exactamente o
     que faltou no incidente real do DAAZPRIME."""
-    texto = f"{pedido} {contexto_extra}".lower()
-    return sum(
-        1
-        for palavras in CATEGORIAS_PEDIDO_FERRAMENTAS.values()
-        if any(termo in texto for termo in palavras)
-    )
+    return len(categorias_pedido(pedido, contexto_extra))
+
+
+# Mapa categoria -> ferramentas dessa categoria, para filtrar TOOL_DEFS
+# por pedido (18 Ago 2026, ideia do utilizador) — em vez de mandar
+# sempre as 7 ferramentas (~968 tokens, medido) quando alguma
+# categoria bate, manda só as da(s) categoria(s) detectada(s) (ex.:
+# um pedido só de preço manda só pesquisar_web, ~115 tokens, ~88%
+# menos). Deliberadamente um pouco generoso onde há sobreposição real
+# ("código" e "ficheiro" partilham ferramentas de leitura) — mesma
+# disciplina de sempre: em caso de dúvida, pende para oferecer a
+# mais, nunca a menos.
+FERRAMENTAS_POR_CATEGORIA = {
+    "ficheiro": (
+        "ler_ficheiro", "listar_ficheiros", "procurar_texto",
+        "ler_varios_ficheiros", "listar_simbolos",
+    ),
+    "codigo": ("ler_ficheiro", "procurar_texto", "correr_ruff", "listar_simbolos"),
+    "web": ("pesquisar_web",),
+}
+
+
+def filtrar_tool_defs(pedido: str, contexto_extra: str = "") -> list:
+    """Só as ferramentas das categorias que o pedido parece tocar, em
+    vez de TOOL_DEFS inteiro. Se não detectar categoria nenhuma (não
+    devia acontecer — quem chama já confirmou
+    provavelmente_precisa_ferramentas antes) ou se o mapa não cobrir
+    o que detectou, devolve TUDO — em caso de dúvida, pende para
+    oferecer a mais, nunca a menos (mesma disciplina de
+    PALAVRAS_CHAVE_FERRAMENTAS)."""
+    categorias = categorias_pedido(pedido, contexto_extra)
+    if not categorias:
+        return TOOL_DEFS
+    nomes = {nome for cat in categorias for nome in FERRAMENTAS_POR_CATEGORIA.get(cat, ())}
+    filtradas = [t for t in TOOL_DEFS if t["function"]["name"] in nomes]
+    return filtradas or TOOL_DEFS
