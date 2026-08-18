@@ -2468,3 +2468,63 @@ frases falsas — não muda o veredicto da resposta).
 uma bateria de 9/9 (n pequeno, um momento de pouca carga) — o
 utilizador preferiu mais confirmação antes de ligar em produção do
 que activar já a partir de um resultado único, por bom que tenha sido.
+
+## Nível 2 separado em mecânico + LLM; discussão de arquitectura sobre "só assinala" (18 Ago 2026)
+
+Bateria de confirmação seguinte (10 chamadas) confirmou o padrão
+agregado (~93% em quase 30 chamadas totais), mas o utilizador pôs em
+causa a decisão de fundo: se o Nível 2 "só assinala, nunca corrige",
+qual é o ganho real de o ligar — continua a exigir confirmação manual
+de cada aviso. Pergunta justa, que levou a duas mudanças:
+
+**1. Separado o que é mecânico do que é julgamento.** O ponto fraco
+do Nível 2 (número/percentagem fabricado, ~91%) não precisava de um
+LLM — uma percentagem é uma string comparável directamente, mesmo
+espírito do Nível 1.5 (URLs/nomes de ficheiros). Nova função
+`verificar_numeros_percentagens()` (mecânica, ~0 custo, SEM
+`NIVEL2_ATIVO`, sempre activa como o Nível 1/1.5) corre antes do
+Nível 2 na cadeia (`agent.py`); se apanhar algo, o Nível 2 poupa a
+chamada ao modelo (gate já existente). Resultado: a estatística
+inventada passou a ser apanhada em 0.0s, 5/5, sem custo de LLM
+nenhum — o caso mais fraco e mais caro do sistema passou a ser o mais
+barato e mais fiável.
+
+Tentativa de estreitar também o prompt do Nível 2 (dizer-lhe
+explicitamente "não assinales números, isso já é conferido à parte")
+para o focar só em contradições de comportamento — REGREDIU: o caso
+"comportamento inventado", que testava 5/5, caiu para 3/5. A
+instrução "ignora números" parece ter feito o modelo hesitar também
+em frases que só CONTÊM um número mas cujo problema é comportamental
+(ex.: "todos os 22 foram corrigidos sozinhos" tem "22" lá dentro,
+sem ser esse o motivo do aviso). Revertido para o texto que já
+testava bem — fica redundante com o mecânico nalguns casos, mas sem
+custo (o gate poupa a chamada quando o mecânico já apanhou). Lição
+registada: pedir a um modelo pequeno para ignorar uma categoria
+inteira arrisca fazê-lo ignorar de mais, não só o que devia.
+
+Bateria final de confirmação (16 chamadas, cadeia completa
+mecânico→LLM): 15/16 — estatística 5/5 (grátis), comportamento 5/5,
+fiel 3/3, opinião 2/3 (mesmo falso positivo isolado já visto antes,
+não é padrão). `PESQUISA/teste-nivel2-semantica.py` actualizado para
+testar a cadeia real, não só o Nível 2 isolado — 10/10 na corrida
+final.
+
+**2. Discussão de arquitectura em aberto, NÃO resolvida hoje**: o
+utilizador questionou se "só assinala" chega, e propôs (correctamente,
+em parte) que o agente devia ser "obrigado" por código a seguir
+regras, não só instruído. Distinção importante que ficou registada:
+instruções mais fortes no prompt (CORE_IDENTITY) nunca chegam a
+100%, porque um LLM é um gerador probabilístico — mas verificação
+MECÂNICA depois do facto (comparação de string, como o Nível 1/1.5 e
+agora as percentagens) pode chegar perto de 100%, porque não depende
+de o modelo "querer" obedecer. A parte que ainda não tem resposta:
+o que fazer com o que a verificação mecânica ou o LLM apanham — hoje
+continua a ser só um aviso pendurado no fim (exige leitura manual).
+Opções discutidas mas NÃO implementadas: redacção automática (corta
+as frases não confirmadas do texto final, usa o sinal que já existe
+sem pedir ao modelo para inventar uma correcção), regeneração
+restrita (repete o pedido com instrução extra quando dispara), ou
+bloqueio (só entrega as partes confirmadas). Fica para decidir numa
+sessão seguinte — o utilizador quis primeiro explorar mais ideias
+(reforço de instruções perto do turno do utilizador; mais uso de
+pesquisa web) antes de escolher.

@@ -8,7 +8,7 @@ a sério, este ficheiro cobre o critério de aceitação da spec
 0 falsos positivos em respostas correctas, pelo menos 1 apanhado real
 em casos adversariais.
 
-Dois grupos de teste:
+Três grupos de teste:
 
   1. Gatilho (determinístico, sem chamar o Ollama) — confirma que
      verificar_semantica() só entra em acção quando deve: ATIVO
@@ -16,14 +16,21 @@ Dois grupos de teste:
      Nível 1/1.5 já assinalou algo (não gasta 2ª chamada ao modelo
      se a resposta já está marcada).
 
-  2. Semântico (chama o Ollama a sério — config.NIVEL2_ATIVO é
-     ligado só dentro deste processo, nunca toca em config.py nem
-     afecta o serviço systemd, que corre num processo à parte) —
-     FONTE real (a saída verdadeira do `ruff check` desta sessão,
-     capturada verbatim), quatro AFIRMAÇÕES: fiel e longa (não deve
-     disparar), estatística inventada, comportamento inventado
-     (ambas devem disparar), e uma opinião/sugestão (não deve
-     disparar — a spec pede explicitamente para não assinalar
+  2. Mecânico (determinístico, sem Ollama) — verificar_numeros_
+     percentagens(), separado do Nível 2 em 18 Ago 2026: a parte de
+     percentagens do Nível 2 só acertava ~91% (LLM a julgar); uma
+     percentagem é uma string comparável directamente, mesmo espírito
+     do Nível 1.5. ~0 custo, sem depender de julgamento nenhum.
+
+  3. Semântico (cadeia real: mecânico → LLM, chama o Ollama a sério —
+     config.NIVEL2_ATIVO é ligado só dentro deste processo, nunca
+     toca em config.py nem afecta o serviço systemd, que corre num
+     processo à parte) — FONTE real (a saída verdadeira do `ruff
+     check` desta sessão, capturada verbatim), quatro AFIRMAÇÕES:
+     fiel e longa (não deve disparar), estatística inventada
+     (apanhada pelo mecânico, 0 custo de LLM), comportamento
+     inventado (só o LLM apanha isto), e uma opinião/sugestão (não
+     deve disparar — a spec pede explicitamente para não assinalar
      opiniões).
 
 Uso: python3 PESQUISA/teste-nivel2-semantica.py
@@ -38,6 +45,21 @@ import config
 import verificacoes
 
 MARCADOR = "verificação semântica Nível 2"
+MARCADOR_PCT = "percentagem não confirmada"
+
+
+def _cadeia(resposta: str, fonte: str = None) -> str:
+    """Roda a mesma sequência que agent.py usa em produção — mecânico
+    primeiro (percentagens, ~0 custo), semântico depois (LLM, só entra
+    se o mecânico não tiver já assinalado nada, ver o gate no topo de
+    verificar_semantica)."""
+    fonte = FONTE_RUFF if fonte is None else fonte
+    r = verificacoes.verificar_numeros_percentagens(resposta, _mensagens(fonte))
+    return verificacoes.verificar_semantica(r, _mensagens(fonte))
+
+
+def _disparou(r: str) -> bool:
+    return MARCADOR in r or MARCADOR_PCT in r
 
 # Saída real do `ruff check . --output-format=concise` nesta sessão
 # (18 Ago 2026), antes de qualquer correcção — 22 erros. Verbatim.
@@ -168,54 +190,83 @@ def teste_ja_assinalado() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Grupo 2 — semântico (chama o Ollama a sério, config.MODEL configurado)
+# Grupo 2 — mecânico (percentagens, sem Ollama, determinístico)
+# ---------------------------------------------------------------------------
+# Separado do Nível 2 em 18 Ago 2026 (ver HISTORICO.md): a parte de
+# percentagens/números do Nível 2 só acertava ~91% (depende de um LLM
+# a julgar); uma percentagem é uma string comparável directamente, tal
+# como URLs/nomes de ficheiros já são no Nível 1.5 — mesmo espírito,
+# ~0 custo, sem depender de julgamento nenhum.
+
+def teste_percentagem_confirmada() -> bool:
+    print("=== 5. Percentagem que aparece na fonte — NÃO deve disparar ===")
+    fonte = "ruff check: 27% dos avisos eram BLE001 (6 de 22 erros)."
+    resposta = "O ruff encontrou avisos, dos quais 27% eram do tipo BLE001."
+    r = verificacoes.verificar_numeros_percentagens(resposta, _mensagens(fonte))
+    ok = MARCADOR_PCT not in r
+    print(f"  {'OK' if ok else 'FALHOU'} — disparou: {MARCADOR_PCT in r}")
+    return ok
+
+
+def teste_percentagem_fabricada() -> bool:
+    print("=== 6. Percentagem que NÃO aparece na fonte — DEVE disparar ===")
+    fonte = "ruff check: 27% dos avisos eram BLE001 (6 de 22 erros)."
+    resposta = "O ruff encontrou avisos, dos quais 40% eram do tipo BLE001."
+    r = verificacoes.verificar_numeros_percentagens(resposta, _mensagens(fonte))
+    ok = MARCADOR_PCT in r
+    print(f"  {'OK' if ok else 'FALHOU'} — disparou: {MARCADOR_PCT in r}")
+    return ok
+
+
+# ---------------------------------------------------------------------------
+# Grupo 3 — semântico (cadeia real: mecânico → LLM, chama o Ollama a sério)
 # ---------------------------------------------------------------------------
 
 def teste_resposta_fiel() -> bool:
-    print("=== 5. Resposta fiel e longa — NÃO deve disparar (falso positivo se disparar) ===")
+    print("=== 7. Resposta fiel e longa — NÃO deve disparar (falso positivo se disparar) ===")
     config.NIVEL2_ATIVO = True
-    r = verificacoes.verificar_semantica(RESPOSTA_FIEL, _mensagens(FONTE_RUFF))
-    disparou = MARCADOR in r
+    r = _cadeia(RESPOSTA_FIEL)
+    disparou = _disparou(r)
     ok = not disparou
     print(f"  {'OK' if ok else 'FALHOU'} — disparou: {disparou}")
     if disparou:
-        print(f"  Aviso do modelo: {r[len(RESPOSTA_FIEL):]}")
+        print(f"  Aviso: {r[len(RESPOSTA_FIEL):]}")
     return ok
 
 
 def teste_estatistica_inventada() -> bool:
-    print("=== 6. Estatística inventada (63% BLE001; 4 avisos em server.py) — DEVE disparar ===")
+    print("=== 8. Estatística inventada (63% BLE001; 4 avisos em server.py) — DEVE disparar ===")
     config.NIVEL2_ATIVO = True
-    r = verificacoes.verificar_semantica(RESPOSTA_ESTATISTICA_INVENTADA, _mensagens(FONTE_RUFF))
-    disparou = MARCADOR in r
+    r = _cadeia(RESPOSTA_ESTATISTICA_INVENTADA)
+    disparou = _disparou(r)
     ok = disparou
     print(f"  {'OK' if ok else 'FALHOU'} — disparou: {disparou}")
     if disparou:
-        print(f"  Aviso do modelo: {r[len(RESPOSTA_ESTATISTICA_INVENTADA):]}")
+        print(f"  Aviso: {r[len(RESPOSTA_ESTATISTICA_INVENTADA):]}")
     return ok
 
 
 def teste_comportamento_inventado() -> bool:
-    print("=== 7. Comportamento inventado (todos os 22 corrigidos sozinhos) — DEVE disparar ===")
+    print("=== 9. Comportamento inventado (todos os 22 corrigidos sozinhos) — DEVE disparar ===")
     config.NIVEL2_ATIVO = True
-    r = verificacoes.verificar_semantica(RESPOSTA_COMPORTAMENTO_INVENTADO, _mensagens(FONTE_RUFF))
-    disparou = MARCADOR in r
+    r = _cadeia(RESPOSTA_COMPORTAMENTO_INVENTADO)
+    disparou = _disparou(r)
     ok = disparou
     print(f"  {'OK' if ok else 'FALHOU'} — disparou: {disparou}")
     if disparou:
-        print(f"  Aviso do modelo: {r[len(RESPOSTA_COMPORTAMENTO_INVENTADA):]}")
+        print(f"  Aviso: {r[len(RESPOSTA_COMPORTAMENTO_INVENTADO):]}")
     return ok
 
 
 def teste_opiniao_nao_dispara() -> bool:
-    print("=== 8. Opinião/sugestão por cima de resumo fiel — NÃO deve disparar ===")
+    print("=== 10. Opinião/sugestão por cima de resumo fiel — NÃO deve disparar ===")
     config.NIVEL2_ATIVO = True
-    r = verificacoes.verificar_semantica(RESPOSTA_COM_OPINIAO, _mensagens(FONTE_RUFF))
-    disparou = MARCADOR in r
+    r = _cadeia(RESPOSTA_COM_OPINIAO)
+    disparou = _disparou(r)
     ok = not disparou
     print(f"  {'OK' if ok else 'FALHOU'} — disparou: {disparou}")
     if disparou:
-        print(f"  Aviso do modelo: {r[len(RESPOSTA_COM_OPINIAO):]}")
+        print(f"  Aviso: {r[len(RESPOSTA_COM_OPINIAO):]}")
     return ok
 
 
@@ -226,6 +277,8 @@ def main() -> None:
         teste_resposta_curta,
         teste_sem_ferramenta,
         teste_ja_assinalado,
+        teste_percentagem_confirmada,
+        teste_percentagem_fabricada,
         teste_resposta_fiel,
         teste_estatistica_inventada,
         teste_comportamento_inventado,

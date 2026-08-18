@@ -596,6 +596,60 @@ def verificar_existencia_ficheiros(resposta: str, mensagens: list) -> str:
     return resposta + aviso
 
 
+# Verificação mecânica de percentagens (18 Ago 2026) — separada do
+# Nível 2 depois de testar: o Nível 2 (LLM a julgar) só apanhava
+# estatísticas fabricadas ~91% das vezes (PESQUISA/teste-nivel2-
+# semantica.py), pior do que os outros ~5 pontos percentuais que apanha
+# em contradições de comportamento. Uma percentagem é uma string, não
+# uma frase — dá para comparar directamente contra a fonte, mesmo
+# espírito do Nível 1.5 (URLs/nomes de ficheiros): ~0 custo, sem
+# depender de julgamento nenhum. Ver HISTORICO.md, 18 Ago 2026.
+#
+# Deliberadamente estreito a PERCENTAGENS só, não "números" em geral —
+# um número solto (linha de código, porta, tamanho de modelo, data)
+# aparece constantemente em prosa técnica sem ser uma alegação
+# estatística; marcar todos dispararia falsos positivos sem parar.
+# Uma percentagem em prosa quase sempre É uma alegação estatística —
+# categoria de risco muito mais limpa.
+_PADRAO_PERCENTAGEM = re.compile(r"(\d+(?:[.,]\d+)?)\s?%")
+
+
+def verificar_numeros_percentagens(resposta: str, mensagens: list) -> str:
+    """Confere se cada percentagem citada na resposta aparece
+    literalmente no resultado real das ferramentas desta troca.
+
+    Só confirma presença LITERAL — uma percentagem calculada
+    correctamente a partir de números reais da fonte (ex.: "6 de 22
+    ≈ 27%") mas que a fonte não escreve por extenso também dispara
+    aqui. Limitação deliberada: entre confiar num cálculo não
+    verificável e assinalar de mais, prefere-se assinalar — o custo é
+    só um aviso, nunca bloqueia (mesmo princípio de todas as outras)."""
+    numeros = {m.group(1) for m in _PADRAO_PERCENTAGEM.finditer(resposta)}
+    if not numeros:
+        return resposta
+
+    fontes = "\n".join(
+        m["content"] for m in mensagens if m.get("role") == "tool" and m.get("content")
+    )
+    if not fontes.strip():
+        return resposta
+
+    nao_confirmadas = []
+    for numero in sorted(numeros):
+        variantes = {numero, numero.replace(",", "."), numero.replace(".", ",")}
+        if not any(re.search(rf"{re.escape(v)}\s?%", fontes) for v in variantes):
+            nao_confirmadas.append(f"{numero}%")
+    if not nao_confirmadas:
+        return resposta
+
+    aviso = (
+        "\n\n---\n[SUPERLLMLOCAL — percentagem não confirmada]\n"
+        "⚠️ Estas percentagens não aparecem literalmente no resultado "
+        "real das ferramentas desta troca: " + "; ".join(nao_confirmadas)
+    )
+    return resposta + aviso
+
+
 # Verificação semântica de conteúdo (17 Ago 2026) — Nível 2 do plano
 # anti-confabulação. Diferente de todos os anteriores: NÍVEL 1/1.5 são
 # mecânicos (regex + comparação de string, custo ~0), esta é a primeira
@@ -655,18 +709,20 @@ def verificar_semantica(resposta: str, mensagens: list) -> str:
     if not fontes.strip():
         return resposta
 
-    # v3 (18 Ago 2026) — o v1 (julgamento holístico directo) falhava a
-    # apanhar números/percentagens fabricados dentro de um parágrafo
-    # maioritariamente correcto (0/4 em PESQUISA/teste-nivel2-semantica.py),
-    # mas era estável. Tentado v2 (raciocínio explícito em 3 passos) e
-    # DESFEZ-SE por completo: com think=False o modelo não tem "rascunho"
-    # invisível para filtrar entre os passos — devolvia o passo 1 inteiro
-    # (todas as frases, incluindo opiniões que o próprio prompt pedia
-    # para NÃO assinalar) como se fosse o resultado do passo 3. Multi-
-    # passo sem thinking não funciona neste modelo. v3 volta ao
-    # julgamento directo do v1, só acrescenta uma frase a apontar
-    # números/percentagens como categoria de atenção especial — sem
-    # pedir fases de raciocínio.
+    # v4, TENTADO E REVERTIDO (18 Ago 2026) — depois de separar as
+    # percentagens para verificar_numeros_percentagens (mecânico),
+    # tentei estreitar este prompt para dizer explicitamente "não
+    # assinales números/percentagens". Regrediu: contradições de
+    # comportamento que testavam 5/5 (v3) caíram para 3/5 — a
+    # instrução "ignora números" parece ter feito o modelo hesitar
+    # também em frases que só CONTÊM um número mas cujo problema real
+    # é comportamental (ex.: "todos os 22 foram corrigidos sozinhos"
+    # tem "22" lá dentro, sem ser esse o motivo do aviso). Revertido
+    # para o texto do v3 — continua a poder assinalar números, é só
+    # redundante com o mecânico (sem custo, o gate no topo desta
+    # função já poupa a chamada quando o mecânico apanha primeiro).
+    # Lição: pedir a um modelo pequeno para ignorar uma categoria
+    # inteira arrisca fazê-lo ignorar de mais, não só o que devia.
     prompt = (
         "Tarefa: verificação factual. FONTE é o resultado real de "
         "ferramentas. AFIRMAÇÃO é uma resposta que deve basear-se só na "

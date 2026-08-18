@@ -525,13 +525,18 @@ def responder(pedido: str, sessao: dict | None = None) -> str:
         # Rede de verificação mecânica anti-confabulação — ver
         # verificacoes.py para o raciocínio completo de cada peça
         # (Nível 1 → 1.5 → URLs → fontes nomeadas → ficheiros citados
-        # → existência contraditada → semântica Nível 2, 10-17 Ago 2026).
+        # → existência contraditada → percentagens → semântica Nível 2,
+        # 10-18 Ago 2026). Percentagens correm antes do Nível 2 de
+        # propósito — é mecânico (~0 custo) e, se já assinalar algo, o
+        # próprio verificar_semantica poupa a 2ª chamada ao modelo
+        # (gate "\n[SUPERLLMLOCAL —" já existente nele).
         resposta = verificacoes.verificar_grounding(resposta, mensagens)
         resposta = verificacoes.verificar_fundamento_categorias(resposta, mensagens)
         resposta = verificacoes.verificar_urls_citados(resposta, mensagens)
         resposta = verificacoes.verificar_fontes_nomeadas(resposta, mensagens)
         resposta = verificacoes.verificar_ficheiros_citados(resposta, mensagens)
         resposta = verificacoes.verificar_existencia_ficheiros(resposta, mensagens)
+        resposta = verificacoes.verificar_numeros_percentagens(resposta, mensagens)
         resposta = verificacoes.verificar_semantica(resposta, mensagens)
 
     # Fase de testes (9 Ago 2026, a pedido do utilizador): grava a
