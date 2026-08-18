@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SUPERLLMLOCAL — Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+:root {
+  --bg: #0f1117;
+  --bg2: #1a1d27;
+  --bg3: #242836;
+  --border: #2e3348;
+  --text: #e1e4ed;
+  --text2: #8b8fa3;
+  --accent: #3b82f6;
+  --accent2: #60a5fa;
+  --green: #22c55e;
+  --yellow: #eab308;
+  --red: #ef4444;
+  --orange: #f97316;
+  --purple: #a855f7;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg); color: var(--text);
+  line-height: 1.5; min-height: 100vh;
+}
+header {
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+  padding: 16px 24px; display: flex; align-items: center; gap: 12px;
+}
+header h1 { font-size: 18px; font-weight: 600; }
+header .status { font-size: 12px; color: var(--green); margin-left: auto; }
+header .status::before { content: '●'; margin-right: 4px; }
+
+nav {
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+  padding: 0 24px; display: flex; gap: 0;
+}
+nav button {
+  background: none; border: none; color: var(--text2); padding: 12px 20px;
+  cursor: pointer; font-size: 14px; border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+nav button:hover { color: var(--text); }
+nav button.active { color: var(--accent2); border-bottom-color: var(--accent); }
+
+main { max-width: 1200px; margin: 0 auto; padding: 24px; }
+section { display: none; }
+section.active { display: block; }
+
+/* KPI Cards */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.kpi {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 20px;
+}
+.kpi .label { font-size: 12px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; }
+.kpi .valor { font-size: 28px; font-weight: 700; margin-top: 4px; }
+.kpi .sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
+.kpi.alert .valor { color: var(--red); }
+.kpi.good .valor { color: var(--green); }
+
+/* Gráficos */
+.chart-container {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 20px; margin-bottom: 24px;
+}
+.chart-container h3 { font-size: 14px; color: var(--text2); margin-bottom: 16px; }
+
+/* Tabelas */
+.table-container {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  overflow: hidden; margin-bottom: 24px;
+}
+.table-header {
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.table-header h3 { font-size: 14px; color: var(--text2); }
+.table-header input, .table-header select {
+  background: var(--bg3); border: 1px solid var(--border); color: var(--text);
+  padding: 6px 12px; border-radius: 4px; font-size: 13px;
+}
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left; padding: 10px 16px; font-size: 12px; color: var(--text2);
+  text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border);
+  background: var(--bg3); cursor: pointer; user-select: none;
+}
+th:hover { color: var(--text); }
+td { padding: 10px 16px; font-size: 13px; border-bottom: 1px solid var(--border); }
+tr:hover { background: var(--bg3); }
+tr.expandido { background: var(--bg3); }
+
+.pedido-preview {
+  max-width: 300px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; cursor: pointer;
+}
+.detalhe-row { display: none; }
+.detalhe-row.visivel { display: table-row; }
+.detalhe-conteudo {
+  padding: 16px; background: var(--bg); border-top: 1px solid var(--border);
+  font-size: 13px; white-space: pre-wrap; word-break: break-word;
+  max-height: 400px; overflow-y: auto;
+}
+.detalhe-conteudo h4 { color: var(--accent2); margin-bottom: 8px; }
+.detalhe-conteudo .rotulo { color: var(--text2); font-weight: 600; }
+
+.tag {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 600; margin-right: 4px;
+}
+.tag-limite { background: #7c2d12; color: #fb923c; }
+.tag-n1 { background: #713f12; color: #facc15; }
+.tag-n15 { background: #581c87; color: #c084fc; }
+.tag-urls { background: #1e3a5f; color: #60a5fa; }
+.tag-fontes { background: #134e4a; color: #5eead4; }
+.tag-ficheiros { background: #3b0764; color: #e879f9; }
+.tag-existencia { background: #7f1d1d; color: #fca5a5; }
+.tag-n2 { background: #064e3b; color: #6ee7b7; }
+.tag-rev { background: #14532d; color: #86efac; }
+.tag-fp { background: #450a0a; color: #fca5a5; }
+
+/* Chat */
+.chat-container {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  display: flex; flex-direction: column; height: calc(100vh - 200px);
+}
+.chat-mensagens {
+  flex: 1; overflow-y: auto; padding: 20px;
+}
+.chat-msg {
+  margin-bottom: 16px; max-width: 85%;
+}
+.chat-msg.user { margin-left: auto; }
+.chat-msg .bubble {
+  padding: 12px 16px; border-radius: 12px; font-size: 14px;
+  line-height: 1.6; word-break: break-word;
+}
+.chat-msg.user .bubble { background: var(--accent); color: white; border-bottom-right-radius: 4px; }
+.chat-msg.agent .bubble { background: var(--bg3); border-bottom-left-radius: 4px; }
+.chat-msg .meta { font-size: 11px; color: var(--text2); margin-top: 4px; padding: 0 4px; }
+.chat-msg.agent .meta span { color: var(--yellow); }
+.chat-msg .bubble code {
+  background: rgba(0,0,0,0.3); padding: 1px 4px; border-radius: 3px; font-size: 13px;
+}
+.chat-msg .bubble pre {
+  background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px;
+  overflow-x: auto; margin: 8px 0; font-size: 13px;
+}
+.chat-input-area {
+  border-top: 1px solid var(--border); padding: 16px 20px;
+  display: flex; gap: 12px;
+}
+.chat-input-area textarea {
+  flex: 1; background: var(--bg3); border: 1px solid var(--border);
+  color: var(--text); padding: 10px 14px; border-radius: 8px;
+  font-size: 14px; resize: none; font-family: inherit;
+  min-height: 44px; max-height: 120px;
+}
+.chat-input-area textarea:focus { outline: none; border-color: var(--accent); }
+.chat-input-area button {
+  background: var(--accent); color: white; border: none; padding: 10px 24px;
+  border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;
+  align-self: flex-end;
+}
+.chat-input-area button:hover { background: var(--accent2); }
+.chat-input-area button:disabled { opacity: 0.5; cursor: not-allowed; }
+.chat-msg .spinner { display: inline-block; width: 16px; height: 16px;
+  border: 2px solid var(--text2); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 8px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Limpeza */
+.limpeza-box {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 24px; max-width: 500px;
+}
+.limpeza-box h3 { font-size: 16px; margin-bottom: 16px; }
+.limpeza-box .aviso {
+  background: #7f1d1d33; border: 1px solid #7f1d1d; border-radius: 6px;
+  padding: 12px; margin-bottom: 16px; font-size: 13px; color: #fca5a5;
+}
+.limpeza-box input {
+  background: var(--bg3); border: 1px solid var(--border); color: var(--text);
+  padding: 8px 12px; border-radius: 4px; font-size: 14px; width: 100%;
+  margin-bottom: 12px;
+}
+.limpeza-box button {
+  background: var(--red); color: white; border: none; padding: 10px 20px;
+  border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600;
+}
+.limpeza-box button:hover { opacity: 0.9; }
+.limpeza-box .resultado {
+  margin-top: 12px; padding: 12px; border-radius: 6px; font-size: 13px;
+  display: none;
+}
+.limpeza-box .resultado.ok { display: block; background: #14532d33; border: 1px solid #14532d; color: #86efac; }
+.limpeza-box .resultado.erro { display: block; background: #7f1d1d33; border: 1px solid #7f1d1d; color: #fca5a5; }
+
+/* Avisos */
+.aviso-card {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 16px 20px; margin-bottom: 12px;
+}
+.aviso-card .topo { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.aviso-card .pedido-texto { font-size: 13px; color: var(--text2); margin-bottom: 8px; }
+.aviso-card .resposta-texto {
+  font-size: 13px; background: var(--bg); padding: 12px; border-radius: 6px;
+  white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto;
+}
+.aviso-card .botoes { margin-top: 12px; display: flex; gap: 8px; }
+.aviso-card .botoes button {
+  padding: 6px 14px; border-radius: 4px; border: 1px solid var(--border);
+  background: var(--bg3); color: var(--text); cursor: pointer; font-size: 12px;
+}
+.aviso-card .botoes button:hover { border-color: var(--accent); }
+.aviso-card .botoes .rev-ok { border-color: var(--green); color: var(--green); }
+.aviso-card .botoes .rev-fp { border-color: var(--red); color: var(--red); }
+.aviso-card .veredito {
+  font-size: 12px; padding: 4px 10px; border-radius: 4px; font-weight: 600;
+}
+.veredito-acerto { background: #14532d33; color: #86efac; }
+.veredito-fp { background: #7f1d1d33; color: #fca5a5; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text2); }
+
+/* Empty state */
+.empty { text-align: center; padding: 60px 20px; color: var(--text2); }
+.empty p { margin-top: 8px; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>SUPERLLMLOCAL Dashboard</h1>
+  <div class="status" id="status">A carregar...</div>
+</header>
+
+<nav>
+  <button class="active" data-tab="visao">Visão Geral</button>
+  <button data-tab="pedidos">Pedidos</button>
+  <button data-tab="chat">Chat</button>
+  <button data-tab="avisos">Avisos</button>
+  <button data-tab="limpeza">Limpeza</button>
+</nav>
+
+<main>
+
+<!-- VISÃO GERAL -->
+<section id="visao" class="active">
+  <div class="kpis" id="kpis"></div>
+  <div class="chart-container">
+    <h3>Tokens por dia (últimos 30 dias)</h3>
+    <canvas id="chartTokens" height="80"></canvas>
+  </div>
+  <div class="chart-container">
+    <h3>Tempo médio de resposta por dia</h3>
+    <canvas id="chartTempo" height="60"></canvas>
+  </div>
+</section>
+
+<!-- PEDIDOS -->
+<section id="pedidos">
+  <div class="table-container">
+    <div class="table-header">
+      <h3>Pedidos</h3>
+      <input type="date" id="filtroDia" />
+      <button onclick="carregarPedidos()" style="background:var(--accent);color:white;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;">Filtrar</button>
+      <button onclick="document.getElementById('filtroDia').value='';carregarPedidos()" style="background:var(--bg3);color:var(--text2);border:1px solid var(--border);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;">Limpar</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Hora</th>
+          <th>Pedido</th>
+          <th>Tokens (E/S)</th>
+          <th>Tempo</th>
+          <th>Voltas</th>
+          <th>Ferramentas</th>
+          <th>Avisos</th>
+        </tr>
+      </thead>
+      <tbody id="tabelaPedidos"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- CHAT -->
+<section id="chat">
+  <div class="chat-container">
+    <div class="chat-mensagens" id="chatMensagens">
+      <div class="empty"><p>Escreve um pedido para falar com o SUPERLLMLOCAL</p></div>
+    </div>
+    <div class="chat-input-area">
+      <textarea id="chatInput" rows="1" placeholder="Escreve o teu pedido..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarChat()}"></textarea>
+      <button id="chatEnviar" onclick="enviarChat()">Enviar</button>
+      <button id="chatNova" onclick="novaConversa()" style="background:var(--bg3);color:var(--text2);border:1px solid var(--border)">Nova Conversa</button>
+    </div>
+  </div>
+</section>
+
+<!-- AVISOS -->
+<section id="avisos">
+  <div id="listaAvisos"></div>
+</section>
+
+<!-- LIMPEZA -->
+<section id="limpeza">
+  <div class="limpeza-box">
+    <h3>Limpar logs antigos</h3>
+    <div class="aviso">
+      Apaga permanentemente todas as linhas de chamadas.jsonl, conversas.jsonl e revisoes.jsonl anteriores à data selecionada. Esta acção é irreversível.
+    </div>
+    <input type="date" id="limpezaData" />
+    <br />
+    <button onclick="limparLogs()">Apagar antes desta data</button>
+    <div class="resultado" id="limpezaResultado"></div>
+  </div>
+</section>
+
+</main>
+
+<script>
+// ---------------------------------------------------------------------------
+// Tab switching
+// ---------------------------------------------------------------------------
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('main section').forEach(s => s.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+    // Carregar dados ao abrir a tab
+    if (btn.dataset.tab === 'visao') carregarResumo();
+    if (btn.dataset.tab === 'pedidos') carregarPedidos();
+    if (btn.dataset.tab === 'avisos') carregarAvisos();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function formatarNumero(n) {
+  return n.toLocaleString('pt-PT');
+}
+
+function tagAviso(tipo) {
+  const mapa = {
+    'LIMITE': 'tag-limite', 'N1': 'tag-n1', 'N1.5': 'tag-n15',
+    'URLS': 'tag-urls', 'FONTES': 'tag-fontes', 'FICHEIROS': 'tag-ficheiros',
+    'EXISTÊNCIA': 'tag-existencia', 'N2': 'tag-n2',
+  };
+  return `<span class="tag ${mapa[tipo] || ''}">${tipo}</span>`;
+}
+
+function tagRevisao(r) {
+  if (!r) return '';
+  if (r === 'acerto') return '<span class="tag tag-rev">acerto</span>';
+  if (r === 'falso_positivo') return '<span class="tag tag-fp">falso positivo</span>';
+  return '';
+}
+
+// ---------------------------------------------------------------------------
+// VISÃO GERAL
+// ---------------------------------------------------------------------------
+let chartTokens = null, chartTempo = null;
+
+async function carregarResumo() {
+  try {
+    const r = await fetch('/api/resumo');
+    const d = await r.json();
+
+    document.getElementById('status').textContent = `${d.total.trocas} trocas totais`;
+
+    // KPIs
+    const kpis = document.getElementById('kpis');
+    const taxaAvisos = d.total.trocas ? (d.total.avisos / d.total.trocas * 100).toFixed(0) : 0;
+    const taxaAcerto = d.total.revisadas ? (d.total.acertos / d.total.revisadas * 100).toFixed(0) : 0;
+
+    kpis.innerHTML = `
+      <div class="kpi">
+        <div class="label">Hoje</div>
+        <div class="valor">${d.hoje.trocas}</div>
+        <div class="sub">trocas</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Tokens hoje (E+S)</div>
+        <div class="valor">${formatarNumero(d.hoje.tokens_entrada + d.hoje.tokens_saida)}</div>
+        <div class="sub">${formatarNumero(d.hoje.tokens_entrada)} entrada + ${formatarNumero(d.hoje.tokens_saida)} saída</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Tempo médio hoje</div>
+        <div class="valor">${d.hoje.tempo_medio}s</div>
+        <div class="sub">por troca</div>
+      </div>
+      <div class="kpi ${d.hoje.avisos ? 'alert' : 'good'}">
+        <div class="label">Avisos hoje</div>
+        <div class="valor">${d.hoje.avisos}</div>
+        <div class="sub">de ${d.hoje.trocas} trocas</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Total trocas</div>
+        <div class="valor">${formatarNumero(d.total.trocas)}</div>
+        <div class="sub">${formatarNumero(d.total.tokens_entrada + d.total.tokens_saida)} tokens</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Taxa de avisos</div>
+        <div class="valor">${taxaAvisos}%</div>
+        <div class="sub">${d.total.avisos} de ${d.total.trocas} trocas</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Revisões humanas</div>
+        <div class="valor">${d.total.revisadas}</div>
+        <div class="sub">${taxaAcerto}% acerto</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Tempo médio global</div>
+        <div class="valor">${d.total.tempo_medio}s</div>
+        <div class="sub">por troca</div>
+      </div>
+    `;
+
+    // Gráfico de tokens
+    const labels = d.dias_30.map(x => x.dia.slice(5)); // MM-DD
+    const ctxTokens = document.getElementById('chartTokens').getContext('2d');
+    if (chartTokens) chartTokens.destroy();
+    chartTokens = new Chart(ctxTokens, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Entrada', data: d.dias_30.map(x => x.tokens_entrada), backgroundColor: '#3b82f680', borderColor: '#3b82f6', borderWidth: 1 },
+          { label: 'Saída', data: d.dias_30.map(x => x.tokens_saida), backgroundColor: '#22c55e80', borderColor: '#22c55e', borderWidth: 1 },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { labels: { color: '#8b8fa3' } } },
+        scales: {
+          x: { ticks: { color: '#8b8fa3' }, grid: { color: '#2e3348' } },
+          y: { ticks: { color: '#8b8fa3' }, grid: { color: '#2e3348' } },
+        },
+      },
+    });
+
+    // Gráfico de tempo
+    const ctxTempo = document.getElementById('chartTempo').getContext('2d');
+    if (chartTempo) chartTempo.destroy();
+    chartTempo = new Chart(ctxTempo, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Tempo médio (s)', data: d.dias_30.map(x => x.tempo_medio), borderColor: '#eab308', backgroundColor: '#eab30820', fill: true, tension: 0.3 },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { labels: { color: '#8b8fa3' } } },
+        scales: {
+          x: { ticks: { color: '#8b8fa3' }, grid: { color: '#2e3348' } },
+          y: { ticks: { color: '#8b8fa3' }, grid: { color: '#2e3348' } },
+        },
+      },
+    });
+  } catch (e) {
+    document.getElementById('status').textContent = 'Erro ao carregar';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PEDIDOS
+// ---------------------------------------------------------------------------
+async function carregarPedidos() {
+  const dia = document.getElementById('filtroDia').value;
+  const url = dia ? `/api/pedidos?dia=${dia}` : '/api/pedidos';
+  try {
+    const r = await fetch(url);
+    const dados = await r.json();
+    const tbody = document.getElementById('tabelaPedidos');
+    if (!dados.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum pedido encontrado</td></tr>';
+      return;
+    }
+    tbody.innerHTML = dados.map((p, i) => `
+      <tr onclick="expandirPedido(${i})" style="cursor:pointer">
+        <td>${p.hora}</td>
+        <td class="pedido-preview">${escapeHtml(p.pedido)}</td>
+        <td>${formatarNumero(p.tokens_entrada)} / ${formatarNumero(p.tokens_saida)}</td>
+        <td>${p.tempo_s}s</td>
+        <td>${p.voltas}</td>
+        <td>${p.ferramentas.map(f => `<span class="tag" style="background:var(--bg3)">${f}</span>`).join(' ')}</td>
+        <td>${p.avisos.map(tagAviso).join('')}${tagRevisao(p.revisao)}</td>
+      </tr>
+      <tr class="detalhe-row" id="detalhe-${i}">
+        <td colspan="7">
+          <div class="detalhe-conteudo" id="detalheConteudo-${i}">
+            <div class="spinner"></div> A carregar...
+          </div>
+        </td>
+      </tr>
+    `).join('');
+    // Guardar timestamps para expansão
+    tbody.dataset.timestamps = JSON.stringify(dados.map(p => p.timestamp));
+  } catch (e) {
+    document.getElementById('tabelaPedidos').innerHTML = '<tr><td colspan="7" class="empty">Erro ao carregar</td></tr>';
+  }
+}
+
+async function expandirPedido(i) {
+  const row = document.getElementById(`detalhe-${i}`);
+  if (row.classList.contains('visivel')) {
+    row.classList.remove('visivel');
+    return;
+  }
+  row.classList.add('visivel');
+  const tbody = document.getElementById('tabelaPedidos');
+  const timestamps = JSON.parse(tbody.dataset.timestamps || '[]');
+  const ts = timestamps[i];
+  if (!ts) return;
+
+  const container = document.getElementById(`detalheConteudo-${i}`);
+  try {
+    const r = await fetch(`/api/pedidos/${ts}`);
+    const d = await r.json();
+    let voltasHtml = '';
+    if (d.voltas && d.voltas.length > 0) {
+      const rows = d.voltas.map((v, vi) => {
+        const ferramentas = v.ferramentas && v.ferramentas.length > 0
+          ? v.ferramentas.join(', ')
+          : '—';
+        return `<tr>
+          <td>${vi + 1}</td>
+          <td>${formatarNumero(v.tokens_entrada)}</td>
+          <td>${formatarNumero(v.tokens_saida)}</td>
+          <td>${v.tempo_s}s</td>
+          <td>${ferramentas}</td>
+        </tr>`;
+      }).join('');
+      const totalE = d.voltas.reduce((s, v) => s + v.tokens_entrada, 0);
+      const totalS = d.voltas.reduce((s, v) => s + v.tokens_saida, 0);
+      voltasHtml = `
+        <h4 style="margin-top:20px">BREAKDOWN POR VOLTA</h4>
+        <div style="overflow-x:auto">
+          <table class="tabela" style="margin:0">
+            <thead><tr>
+              <th>#</th><th>Tokens E</th><th>Tokens S</th><th>Tempo</th><th>Ferramentas</th>
+            </tr></thead>
+            <tbody>${rows}
+              <tr style="font-weight:600;border-top:2px solid var(--border)">
+                <td>TOTAL</td><td>${formatarNumero(totalE)}</td><td>${formatarNumero(totalS)}</td>
+                <td>${d.voltas.reduce((s, v) => s + v.tempo_s, 0).toFixed(1)}s</td><td></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>`;
+    }
+    container.innerHTML = `
+      <h4>PEDIDO</h4>
+      <div style="margin-bottom:16px">${escapeHtml(d.pedido)}</div>
+      <h4>RESPOSTA</h4>
+      <div>${escapeHtml(d.resposta)}</div>
+      <div style="margin-top:12px;color:var(--text2);font-size:12px">
+        commit: ${d.commit} | ${d.dia} ${d.hora}
+      </div>
+      ${voltasHtml}
+    `;
+  } catch (e) {
+    container.innerHTML = '<span style="color:var(--red)">Erro ao carregar detalhe</span>';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CHAT
+// ---------------------------------------------------------------------------
+function novaConversa() {
+  const msgs = document.getElementById('chatMensagens');
+  msgs.innerHTML = '<div class="empty"><p>Escreve um pedido para falar com o SUPERLLMLOCAL</p></div>';
+}
+
+// ---------------------------------------------------------------------------
+async function enviarChat() {
+  const input = document.getElementById('chatInput');
+  const texto = input.value.trim();
+  if (!texto) return;
+
+  const msgs = document.getElementById('chatMensagens');
+  // Limpar empty state
+  const empty = msgs.querySelector('.empty');
+  if (empty) empty.remove();
+
+  // Mensagem do utilizador
+  msgs.innerHTML += `
+    <div class="chat-msg user">
+      <div class="bubble">${escapeHtml(texto)}</div>
+    </div>
+  `;
+  input.value = '';
+  input.style.height = 'auto';
+
+  // Indicador de processamento
+  const idSpinner = 'spinner-' + Date.now();
+  msgs.innerHTML += `
+    <div class="chat-msg agent" id="${idSpinner}">
+      <div class="bubble"><span class="spinner"></span> A pensar...</div>
+    </div>
+  `;
+  msgs.scrollTop = msgs.scrollHeight;
+
+  const btn = document.getElementById('chatEnviar');
+  btn.disabled = true;
+
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pedido: texto }),
+    });
+    const d = await r.json();
+    const el = document.getElementById(idSpinner);
+    if (el) {
+      const agora = new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+      const tokE = d.tokens_entrada || 0;
+      const tokS = d.tokens_saida || 0;
+      const tempo = d.tempo_s || 0;
+      const nVoltas = (d.voltas || []).length;
+      const stats = `📊 ${formatarNumero(tokE)} entrada + ${formatarNumero(tokS)} saída · ${tempo}s` + (nVoltas > 1 ? ` · ${nVoltas} voltas` : '');
+      el.innerHTML = `
+        <div class="bubble">${marked.parse(d.resposta || d.error || 'Erro desconhecido')}</div>
+        <div class="meta">${agora} · <span>${stats}</span></div>
+      `;
+    }
+  } catch (e) {
+    const el = document.getElementById(idSpinner);
+    if (el) el.innerHTML = `<div class="bubble" style="color:var(--red)">Erro de ligação: ${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+}
+
+// Auto-resize textarea
+document.getElementById('chatInput').addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+
+// ---------------------------------------------------------------------------
+// AVISOS
+// ---------------------------------------------------------------------------
+async function carregarAvisos() {
+  try {
+    const r = await fetch('/api/avisos');
+    const dados = await r.json();
+    const container = document.getElementById('listaAvisos');
+    if (!dados.length) {
+      container.innerHTML = '<div class="empty"><p>Nenhum aviso registado</p></div>';
+      return;
+    }
+    container.innerHTML = dados.map(a => `
+      <div class="aviso-card">
+        <div class="topo">
+          <strong>${a.dia} ${a.hora}</strong>
+          ${a.avisos.map(tagAviso).join('')}
+          ${tagRevisao(a.revisao)}
+          <span style="color:var(--text2);font-size:12px;margin-left:auto">${a.voltas} volta(s)</span>
+        </div>
+        <div class="pedido-texto">${escapeHtml(a.pedido)}</div>
+        <div class="resposta-texto">${escapeHtml(a.resposta)}</div>
+        ${!a.revisao ? `
+        <div class="botoes">
+          <button class="rev-ok" onclick="gravarRevisao(${a.timestamp},'acerto',this)">Acerto</button>
+          <button class="rev-fp" onclick="gravarRevisao(${a.timestamp},'falso_positivo',this)">Falso positivo</button>
+        </div>
+        ` : ''}
+      </div>
+    `).join('');
+  } catch (e) {
+    document.getElementById('listaAvisos').innerHTML = '<div class="empty"><p>Erro ao carregar avisos</p></div>';
+  }
+}
+
+async function gravarRevisao(ts, veredito, btn) {
+  try {
+    await fetch('/api/revisao', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timestamp: ts, veredito }),
+    });
+    // Actualizar UI
+    const card = btn.closest('.aviso-card');
+    const botoes = card.querySelector('.botoes');
+    if (botoes) botoes.remove();
+    const topo = card.querySelector('.topo');
+    topo.insertAdjacentHTML('beforeend', tagRevisao(veredito));
+  } catch (e) {
+    alert('Erro ao gravar revisão');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// LIMPEZA
+// ---------------------------------------------------------------------------
+async function limparLogs() {
+  const data = document.getElementById('limpezaData').value;
+  if (!data) { alert('Selecciona uma data primeiro'); return; }
+  if (!confirm(`Apagar TODAS as linhas anteriores a ${data}?\n\nEsta acção é irreversível.`)) return;
+
+  const resultado = document.getElementById('limpezaResultado');
+  try {
+    const r = await fetch('/api/limpar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ antes_de: data }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      resultado.className = 'resultado ok';
+      resultado.textContent = `Removidas: ${d.removidas.chamadas} chamadas, ${d.removidas.conversas} conversas, ${d.removidas.revisoes} revisões.`;
+      // Actualizar KPIs
+      carregarResumo();
+    } else {
+      resultado.className = 'resultado erro';
+      resultado.textContent = d.error || 'Erro desconhecido';
+    }
+  } catch (e) {
+    resultado.className = 'resultado erro';
+    resultado.textContent = 'Erro de ligação: ' + e.message;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Util
+// ---------------------------------------------------------------------------
+function escapeHtml(t) {
+  const d = document.createElement('div');
+  d.textContent = t || '';
+  return d.innerHTML;
+}
+
+// ---------------------------------------------------------------------------
+// Arranque
+// ---------------------------------------------------------------------------
+carregarResumo();
+</script>
+</body>
+</html>
